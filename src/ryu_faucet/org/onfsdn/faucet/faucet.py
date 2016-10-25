@@ -276,9 +276,10 @@ class Faucet(app_manager.RyuApp):
         for new_dp in new_dps:
             # pylint: disable=no-member
             flowmods = self.valves[new_dp.dp_id].reload_config(new_dp)
-            ryudp = self.dpset.get(new_dp.dp_id)
-            self._send_flow_msgs(ryudp, flowmods)
-            self._reset_bgp()
+            if flowmods:
+                ryudp = self.dpset.get(new_dp.dp_id)
+                self._send_flow_msgs(ryudp, flowmods)
+                self._reset_bgp()
 
     @set_ev_cls(EventFaucetResolveGateways, MAIN_DISPATCHER)
     def resolve_gateways(self, ryu_event):
