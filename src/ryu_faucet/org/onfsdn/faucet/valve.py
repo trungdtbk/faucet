@@ -756,6 +756,7 @@ class Valve(object):
 
             port_changed_flag = False
             changed_ports = {}
+            deleted_ports = {}
             for port_no, new_port in new_dp.ports.iteritems():
                 if port_no not in self.dp.ports:
                     port_changed_flag = True
