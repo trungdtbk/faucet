@@ -40,13 +40,15 @@ class ValveRouteManager(object):
     """Base class to implement RIB/FIB."""
 
     def __init__(self, logger, faucet_mac, arp_neighbor_timeout,
-                 fib_table, eth_src_table, eth_dst_table, route_priority,
+                 fib_table, ip_multi_table, eth_src_table, eth_dst_table,
+                 route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
                  valve_flowcontroller):
         self.logger = logger
         self.faucet_mac = faucet_mac
         self.arp_neighbor_timeout = arp_neighbor_timeout
         self.fib_table = fib_table
+        self.ip_multi_table = ip_multi_table
         self.eth_src_table = eth_src_table
         self.eth_dst_table = eth_dst_table
         self.route_priority = route_priority
@@ -116,7 +118,7 @@ class ValveRouteManager(object):
                     [valve_of.set_eth_src(self.faucet_mac),
                      valve_of.set_eth_dst(eth_dst),
                      valve_of.dec_ip_ttl()])] +
-                [valve_of.goto_table(self.eth_dst_table)]))
+                [valve_of.goto_table(self.ip_multi_table)]))
         now = time.time()
         link_neighbor = LinkNeighbor(eth_dst, now)
         neighbor_cache = self._vlan_neighbor_cache(vlan)

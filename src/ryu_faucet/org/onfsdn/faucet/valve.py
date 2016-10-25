@@ -79,13 +79,15 @@ class Valve(object):
         # Should interface with a common composer class.
         self.ipv4_route_manager = valve_route.ValveIPv4RouteManager(
             self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
-            self.dp.ipv4_fib_table, self.dp.eth_src_table, self.dp.eth_dst_table,
+            self.dp.ipv4_fib_table, self.dp.ip_multi_table,
+            self.dp.eth_src_table, self.dp.eth_dst_table,
             self.dp.highest_priority,
             self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
             self.valve_flowcontroller)
         self.ipv6_route_manager = valve_route.ValveIPv6RouteManager(
             self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
-            self.dp.ipv6_fib_table, self.dp.eth_src_table, self.dp.eth_dst_table,
+            self.dp.ipv6_fib_table, self.dp.ip_multi_table,
+            self.dp.eth_src_table, self.dp.eth_dst_table,
             self.dp.highest_priority,
             self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
             self.valve_flowcontroller)
@@ -118,6 +120,8 @@ class Valve(object):
             self.dp.ipv6_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
                 'icmpv6_type', 'ipv6_dst'),
+            self.dp.ip_multi_table:(
+                'vlan_vid', 'metadata'),
             self.dp.eth_dst_table: (
                 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
@@ -197,6 +201,7 @@ class Valve(object):
             self.dp.eth_src_table,
             self.dp.ipv4_fib_table,
             self.dp.ipv6_fib_table,
+            self.dp.ip_multi_table,
             self.dp.eth_dst_table,
             self.dp.flood_table)
 
@@ -333,6 +338,11 @@ class Valve(object):
         ofmsgs.extend(self._add_default_drop_flows())
         ofmsgs.extend(self._add_vlan_flood_flow())
         ofmsgs.extend(self._add_controller_learn_flow())
+        #Add a default rule to ip_multi_table to allow everythin through
+        ofmsgs.append(self.valve_flowmod(table_id=self.dp.ip_multi_table,
+                                         priority=self.dp.high_priority,
+                                         inst=[valve_of.goto_table(
+                                             self.dp.eth_dst_table)]))
         return ofmsgs
 
     def _add_vlan(self, vlan, all_port_nums):
