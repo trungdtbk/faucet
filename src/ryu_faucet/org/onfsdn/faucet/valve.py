@@ -405,7 +405,7 @@ class Valve(object):
             forwarding_table = self.dp.acl_table
             acl_rule_priority = self.dp.highest_priority
             acl_allow_inst = valve_of.goto_table(self.dp.eth_src_table)
-            for rule_conf in self.dp.acls[acl_num]:
+            for rule_conf in self.dp.acls[acl_num].rules:
                 acl_match, acl_inst = valve_acl.build_acl_entry(
                     rule_conf, acl_allow_inst, port_num)
                 ofmsgs.append(self.valve_flowmod(
