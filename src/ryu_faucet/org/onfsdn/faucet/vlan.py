@@ -149,3 +149,19 @@ class VLAN(Conf):
             if ip in controller_ip:
                 return True
         return False
+
+    def __hash__(self):
+
+        return hash(str(map(str, (self.controller_ips,
+                                  self.vid,
+                                  self.bgp_as,
+                                  self.bgp_port,
+                                  self.bgp_routerid,
+                                  self.bgp_neighbor_as,
+                                  self.bgp_neighbor_address))))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)

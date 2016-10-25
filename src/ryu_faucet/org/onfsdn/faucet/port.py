@@ -67,7 +67,17 @@ class Port(Conf):
         return hash(self) == hash(other)
 
     def __hash__(self):
-        return hash(('Port', self.number))
+        return hash(str(map(str, (self.number,
+                              self.name,
+                              self.enabled,
+                              self.permanent_learn,
+                              self.unicast_flood,
+                              self.mirror,
+                              self.mirror_destination,
+                              self.native_vlan,
+                              self.tagged_vlans,
+                              self.acl_in,
+                              self.stack))))
 
     def __ne__(self, other):
         return not self.__eq__(other)
