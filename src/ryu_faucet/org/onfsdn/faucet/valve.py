@@ -335,6 +335,22 @@ class Valve(object):
         ofmsgs.extend(self._add_controller_learn_flow())
         return ofmsgs
 
+    def _add_vlan(self, vlan, all_port_nums):
+        """Configure a VLAN
+        """
+        ofmsgs = []
+        self.logger.info('Configuring VLAN %s', vlan)
+        for port in vlan.get_ports():
+            all_port_nums.add(port.number)
+        # add mirror destination ports.
+        for port in vlan.mirror_destination_ports():
+            all_port_nums.add(port.number)
+        # install eth_dst_table flood ofmsgs
+        ofmsgs.extend(self.flood_manager.build_flood_rules(vlan))
+        # add controller IPs if configured.
+        ofmsgs.extend(self._add_controller_ips(vlan.controller_ips, vlan))
+        return ofmsgs
+
     def _add_ports_and_vlans(self, discovered_port_nums):
         """Add all configured and discovered ports and VLANs."""
         ofmsgs = []
@@ -342,16 +358,7 @@ class Valve(object):
 
         # add vlan ports
         for vlan in self.dp.vlans.itervalues():
-            self.logger.info('Configuring VLAN %s', vlan)
-            for port in vlan.get_ports():
-                all_port_nums.add(port.number)
-            # add mirror destination ports.
-            for port in vlan.mirror_destination_ports():
-                all_port_nums.add(port.number)
-            # install eth_dst_table flood ofmsgs
-            ofmsgs.extend(self.flood_manager.build_flood_rules(vlan))
-            # add controller IPs if configured.
-            ofmsgs.extend(self._add_controller_ips(vlan.controller_ips, vlan))
+            ofmsgs.extend(self._add_vlan(vlan, all_port_nums))
 
         # add any ports discovered but not configured
         for port_num in discovered_port_nums:
