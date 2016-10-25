@@ -592,7 +592,7 @@ class Valve(object):
         if eth_dst == self.FAUCET_MAC or not valve_packet.mac_addr_is_unicast(eth_dst):
             for handler in (self.ipv4_route_manager.control_plane_handler,
                             self.ipv6_route_manager.control_plane_handler):
-                ofmsgs = handler(in_port, vlan, eth_src, eth_dst, pkt)
+                ofmsgs = handler(self.dp.dp_id, in_port, vlan, eth_src, eth_dst, pkt)
                 if ofmsgs:
                     return ofmsgs
         return []

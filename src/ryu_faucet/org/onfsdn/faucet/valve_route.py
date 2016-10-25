@@ -31,7 +31,9 @@ from ryu.ofproto import inet
 class LinkNeighbor(object):
     """Describes a link (layer 2) neighbor, as a nexthop."""
 
-    def __init__(self, eth_src, now):
+    def __init__(self, dp_id, port_no, eth_src, now):
+        self.dp_id = dp_id
+        self.port_no = port_no
         self.eth_src = eth_src
         self.cache_time = now
 
@@ -119,13 +121,9 @@ class ValveRouteManager(object):
                      valve_of.set_eth_dst(eth_dst),
                      valve_of.dec_ip_ttl()])] +
                 [valve_of.goto_table(self.ip_multi_table)]))
-        now = time.time()
-        link_neighbor = LinkNeighbor(eth_dst, now)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
-        neighbor_cache[ip_gw] = link_neighbor
         return ofmsgs
 
-    def _update_nexthop(self, vlan, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, dp_id, in_port, vlan, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
         routes = self._vlan_routes(vlan)
@@ -140,6 +138,11 @@ class ValveRouteManager(object):
             if ip_gw == resolved_ip_gw:
                 ofmsgs.extend(self._add_resolved_route(
                     vlan, ip_gw, ip_dst, eth_src, is_updated))
+
+        now = time.time()
+        link_neighbor = LinkNeighbor(dp_id, in_port, eth_src, now)
+        neighbor_cache[resolved_ip_gw] = link_neighbor
+
         return ofmsgs
 
     def resolve_gateways(self, vlan, now):
@@ -216,7 +219,7 @@ class ValveRouteManager(object):
                 self.fib_table, route_match))
         return ofmsgs
 
-    def control_plane_handler(self, in_port, vlan, eth_src, eth_dst, pkt):
+    def control_plane_handler(self, dp_id, in_port, vlan, eth_src, eth_dst, pkt):
         pass
 
 
@@ -270,7 +273,8 @@ class ValveIPv4RouteManager(ValveRouteManager):
             priority=priority))
         return ofmsgs
 
-    def control_plane_arp_handler(self, in_port, vlan, eth_src, eth_dst, arp_pkt):
+    def control_plane_arp_handler(self,
+            dp_id, in_port, vlan, eth_src, eth_dst, arp_pkt):
         ofmsgs = []
         opcode = arp_pkt.opcode
         src_ip = ipaddr.IPv4Address(arp_pkt.src_ip)
@@ -290,7 +294,8 @@ class ValveIPv4RouteManager(ValveRouteManager):
               vlan.ip_in_controller_subnet(src_ip) and
               vlan.ip_in_controller_subnet(dst_ip)):
             self.logger.info('ARP response %s for %s', eth_src, src_ip)
-            ofmsgs.extend(self._update_nexthop(vlan, eth_src, src_ip))
+            ofmsgs.extend(self._update_nexthop(
+                                        dp_id, in_port, vlan, eth_src, src_ip))
         return ofmsgs
 
     def control_plane_icmp_handler(self, in_port, vlan, eth_src,
@@ -307,11 +312,11 @@ class ValveIPv4RouteManager(ValveRouteManager):
             ofmsgs.append(valve_of.packetout(in_port, echo_reply.data))
         return ofmsgs
 
-    def control_plane_handler(self, in_port, vlan, eth_src, eth_dst, pkt):
+    def control_plane_handler(self, dp_id, in_port, vlan, eth_src, eth_dst, pkt):
         arp_pkt = pkt.get_protocol(arp.arp)
         if arp_pkt is not None:
             return self.control_plane_arp_handler(
-                in_port, vlan, eth_src, eth_dst, arp_pkt)
+                dp_id, in_port, vlan, eth_src, eth_dst, arp_pkt)
 
         ipv4_pkt = pkt.get_protocol(ipv4.ipv4)
         if ipv4_pkt is not None:
@@ -385,7 +390,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
             priority=priority))
         return ofmsgs
 
-    def control_plane_icmpv6_handler(self, in_port, vlan, eth_src,
+    def control_plane_icmpv6_handler(self, dp_id, in_port, vlan, eth_src,
                                      ipv6_pkt, icmpv6_pkt):
         vid = self._vlan_vid(vlan, in_port)
         src_ip = ipaddr.IPv6Address(ipv6_pkt.src)
@@ -402,7 +407,8 @@ class ValveIPv6RouteManager(ValveRouteManager):
               vlan.ip_in_controller_subnet(src_ip)):
             resolved_ip_gw = ipaddr.IPv6Address(icmpv6_pkt.data.dst)
             self.logger.info('ND response %s for %s', eth_src, resolved_ip_gw)
-            ofmsgs.extend(self._update_nexthop(vlan, eth_src, resolved_ip_gw))
+            ofmsgs.extend(self._update_nexthop(
+                                dp_id, in_port, vlan, eth_src, resolved_ip_gw))
         elif icmpv6_type == icmpv6.ICMPV6_ECHO_REQUEST:
             icmpv6_echo_reply = valve_packet.icmpv6_echo_reply(
                 self.faucet_mac, eth_src, vid,
@@ -411,11 +417,11 @@ class ValveIPv6RouteManager(ValveRouteManager):
             ofmsgs.extend([valve_of.packetout(in_port, icmpv6_echo_reply.data)])
         return ofmsgs
 
-    def control_plane_handler(self, in_port, vlan, eth_src, eth_dst, pkt):
+    def control_plane_handler(self, dp_id, in_port, vlan, eth_src, eth_dst, pkt):
         ipv6_pkt = pkt.get_protocol(ipv6.ipv6)
         if ipv6_pkt is not None:
             icmpv6_pkt = pkt.get_protocol(icmpv6.icmpv6)
             if icmpv6_pkt is not None:
                 return self.control_plane_icmpv6_handler(
-                    in_port, vlan, eth_src, ipv6_pkt, icmpv6_pkt)
+                    dp_id, in_port, vlan, eth_src, ipv6_pkt, icmpv6_pkt)
         return []
