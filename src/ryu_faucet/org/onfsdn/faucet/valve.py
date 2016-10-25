@@ -720,9 +720,77 @@ class Valve(object):
         # (for example) an ACL on a port.
         ofmsgs = []
         if self.dp.running:
+            """Reload what has been changed
+            """
+            acl_changed_flag = False
+            changed_acls = {}
+            for acl_id, new_acl in new_dp.acls.iteritems():
+                if acl_id not in self.dp.acls:
+                    acl_changed_flag = True
+                    changed_acls[acl_id] = new_acl
+                else:
+                    if new_acl != self.dp.acls[acl_id]:
+                        acl_changed_flag = True
+                        changed_acls[acl_id] = new_acl
+
+            vlan_changed_flag = False
+            changed_vlans = {}
+            for vid, new_vlan in new_dp.vlans.iteritems():
+                if vid not in self.dp.vlans:
+                    vlan_changed_flag = True
+                    changed_vlans[vid] = new_vlan
+                else:
+                    if new_vlan != self.dp.vlans[vid]:
+                        vlan_changed_flag = True
+                        changed_vlans[vid] = new_vlan
+
+            port_changed_flag = False
+            changed_ports = {}
+            for port_no, new_port in new_dp.ports.iteritems():
+                if port_no not in self.dp.ports:
+                    port_changed_flag = True
+                    changed_ports[port_no] = new_port
+                else:
+                    if new_port != self.dp.ports[port_no]:
+                        port_changed_flag = True
+                        changed_ports[port_no] = new_port
+                    else:
+                        if new_port.acl_in in changed_acls:
+                            port_changed_flag = True
+                            changed_ports[port_no] = new_port
+                        for vlan in changed_vlans.values():
+                            for port in vlan.get_ports():
+                                if port_no == port.number:
+                                    port_changed_flag = True
+                                    changed_ports[port_no] = new_port
+
+            if acl_changed_flag:
+                self.logger.info("ACL configs have changed")
+
+            if vlan_changed_flag:
+                self.logger.info("VLAN configs have changed")
+
+            if port_changed_flag:
+                self.logger.info("PORT configs have changed")
+                deleted_ports = {}
+                for port_no, port in self.dp.ports.iteritems():
+                    if port_no not in new_dp.ports:
+                        deleted_ports[port_no] = port
+
+            # Reload changed configs
             self.dp = new_dp
-            ofmsgs = self.datapath_connect(
-                self.dp.dp_id, self.dp.ports.keys())
+            self.dp.running = True
+
+            # Reload vlan config
+            #TODO: Delete old vlan rules (i.e. in eth_src_table, & fib tables
+            for vlan in changed_vlans.values():
+                ofmsgs.extend(self._add_vlan(vlan, set()))
+            # Reload port config
+            for port_no in deleted_ports.iterkeys():
+                ofmsgs.extend(self.port_delete(self.dp.dp_id, port_no))
+            for port_no in changed_ports.iterkeys():
+                ofmsgs.extend(self.port_add(self.dp.dp_id, port_no))
+
         return ofmsgs
 
     def _add_controller_ips(self, controller_ips, vlan):

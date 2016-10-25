@@ -36,7 +36,7 @@ class ACL(Conf):
     def set_defaults(self):
         for key, value in self.defaults.iteritems():
             self._set_default(key, value)
-        self._set_default('id', self._id)
+        self._set_default('_id', self._id)
         self._set_default('name', str(self._id))
         self._set_default('rules', [])
 
@@ -44,7 +44,7 @@ class ACL(Conf):
         return hash(self) == hash(other)
 
     def __hash__(self):
-        return hash(str(map(str, (self.id,
+        return hash(str(map(str, (self._id,
                                   self.name,
                                   self.rules))))
 
