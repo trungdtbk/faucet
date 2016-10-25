@@ -59,6 +59,9 @@ class ValveRouteManager(object):
         self.valve_flowmod = valve_flowmod
         self.valve_flowcontroller = valve_flowcontroller
 
+        self.arp_cache = {}
+        self.nd_cache = {}
+
     def _vlan_vid(self, vlan, in_port):
         vid = None
         if vlan.port_is_tagged(in_port):
@@ -72,7 +75,7 @@ class ValveRouteManager(object):
     def _vlan_routes(self, vlan):
         pass
 
-    def _vlan_neighbor_cache(self, vlan):
+    def _neighbor_cache(self):
         pass
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
@@ -127,7 +130,7 @@ class ValveRouteManager(object):
         ofmsgs = []
         is_updated = None
         routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        neighbor_cache = self._neighbor_cache()
         if resolved_ip_gw in neighbor_cache:
             cached_eth_dst = neighbor_cache[resolved_ip_gw].eth_src
             if cached_eth_dst != eth_src:
@@ -158,7 +161,7 @@ class ValveRouteManager(object):
         untagged_ports = vlan.untagged_flood_ports(False)
         tagged_ports = vlan.tagged_flood_ports(False)
         routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        neighbor_cache = self._neighbor_cache()
         for ip_gw in set(routes.values()):
             for controller_ip in vlan.controller_ips:
                 if ip_gw in controller_ip:
@@ -185,7 +188,7 @@ class ValveRouteManager(object):
         """
         ofmsgs = []
         routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        neighbor_cache = self._neighbor_cache()
         routes[ip_dst] = ip_gw
         if ip_gw in neighbor_cache:
             eth_dst = neighbor_cache[ip_gw].eth_src
@@ -232,8 +235,8 @@ class ValveIPv4RouteManager(ValveRouteManager):
     def _vlan_routes(self, vlan):
         return vlan.ipv4_routes
 
-    def _vlan_neighbor_cache(self, vlan):
-        return vlan.arp_cache
+    def _neighbor_cache(self):
+        return self.arp_cache
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
         return valve_packet.arp_request(
@@ -337,8 +340,8 @@ class ValveIPv6RouteManager(ValveRouteManager):
     def _vlan_routes(self, vlan):
         return vlan.ipv6_routes
 
-    def _vlan_neighbor_cache(self, vlan):
-        return vlan.nd_cache
+    def _neighbor_cache(self):
+        return self.nd_cache
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
         return valve_packet.nd_request(

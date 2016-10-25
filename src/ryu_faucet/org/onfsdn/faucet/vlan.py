@@ -25,8 +25,6 @@ class VLAN(Conf):
     controller_ips = None
     ipv4_routes = None
     ipv6_routes = None
-    arp_cache = None
-    nd_cache = None
     host_cache = None
     bgp_as = None
     bgp_port = None
