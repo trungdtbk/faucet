@@ -47,6 +47,9 @@ def build_acl_entry(rule_conf, acl_allow_inst, port_num):
                 continue
             if attrib_value['allow'] == 1:
                 acl_inst.append(acl_allow_inst)
+            if 'mark' in attrib_value:
+                marker = attrib_value['mark']
+                acl_inst.append(valve_of.write_metadata(marker))
         else:
             match_dict[attrib] = attrib_value
     # override in_port always

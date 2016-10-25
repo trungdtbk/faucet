@@ -35,6 +35,14 @@ def ignore_port(port_num):
     # 0xF0000000 and up are not physical ports.
     return port_num > 0xF0000000
 
+def write_metadata(metadata, mask=(1<<64) -1):
+    """Return instruction that add metadata to packets
+    Args:
+        metadata and mask
+    Returns:
+        ryu.ofproto.ofproto_v1_3_parser.OFPInstructionWriteMetadata
+    """
+    return parser.OFPInstructionWriteMetadata(metadata, mask)
 
 def apply_actions(actions):
     """Return instruction that applies action list.
