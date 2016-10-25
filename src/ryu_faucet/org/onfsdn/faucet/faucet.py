@@ -23,7 +23,7 @@ import signal
 
 import ipaddr
 
-from config_parser import config_file_hash, dp_parser
+from config_parser import config_file_hash, dp_parser, bgp_parser, route_parser
 from valve import valve_factory
 from util import kill_on_exception, get_sys_prefix, get_logger, dpid_log
 
@@ -112,15 +112,31 @@ class Faucet(app_manager.RyuApp):
             else:
                 self.valves[valve_dp.dp_id] = valve(valve_dp, self.logname)
 
+        self.bgp_conf = bgp_parser(self.config_file, self.logname)
+        self._load_static_routes()
+
         self.gateway_resolve_request_thread = hub.spawn(
             self.gateway_resolve_request)
         self.host_expire_request_thread = hub.spawn(
             self.host_expire_request)
 
-        self.dp_bgp_speakers = {}
+
+        self.bgp_speaker = None
         self._reset_bgp()
 
-    def _bgp_route_handler(self, path_change, vlan):
+    def _load_static_routes(self):
+        route_conf = route_parser(self.config_file, self.logname)
+        if route_conf:
+            routes = [route['route'] for route in route_conf]
+            for route in routes:
+                ip_gw = ipaddr.IPAddress(route['ip_gw'])
+                ip_dst = ipaddr.IPNetwork(route['ip_dst'])
+                assert ip_gw.version == ip_dst.version
+                for valve in self.valves.values():
+                    valve.add_route(ip_dst=ip_dst, ip_gw=ip_gw)
+
+
+    def _bgp_route_handler(self, path_change):
         """Handle a BGP change event.
 
         Args:
@@ -131,71 +147,68 @@ class Faucet(app_manager.RyuApp):
         nexthop = ipaddr.IPAddress(path_change.nexthop)
         withdraw = path_change.is_withdraw
         flowmods = []
-        valve = self.valves[vlan.dp_id]
-        ryudp = self.dpset.get(valve.dp.dp_id)
-        for connected_network in vlan.controller_ips:
-            if nexthop in connected_network:
-                if nexthop == connected_network.ip:
+        for dp_id, valve in self.valves.iteritems():
+            for connected_network in valve.get_controller_ips():
+                if nexthop in connected_network:
+                    if nexthop == connected_network.ip:
+                        self.logger.error(
+                            'bgp nexthop %s for prefix %s cannot be us',
+                            nexthop, prefix)
+                    elif withdraw:
+                        self.logger.info(
+                            'BGP withdraw %s nexthop %s',
+                            prefix, nexthop)
+                        flowmods = valve.del_route(prefix)
+                    else:
+                        self.logger.info(
+                            'BGP add %s nexthop %s', prefix, nexthop)
+                        flowmods = valve.add_route(ip_gw=nexthop, ip_dst=prefix)
+
+                    if flowmods:
+                        ryudp = self.dpset.get(valve.dp.dp_id)
+                        self._send_flow_msgs(ryudp, flowmods)
+                        continue
+
                     self.logger.error(
-                        'BGP nexthop %s for prefix %s cannot be us',
-                        nexthop, prefix)
-                elif withdraw:
-                    self.logger.info(
-                        'BGP withdraw %s nexthop %s',
-                        prefix, nexthop)
-                    flowmods = valve.del_route(vlan, prefix)
-                else:
-                    self.logger.info(
-                        'BGP add %s nexthop %s', prefix, nexthop)
-                    flowmods = valve.add_route(vlan, nexthop, prefix)
-                if flowmods:
-                    self._send_flow_msgs(ryudp, flowmods)
-                return
-        self.logger.error(
-            'BGP nexthop %s for prefix %s is not a connected network',
-            nexthop, prefix)
-
-    def _create_bgp_speaker_for_vlan(self, vlan):
-        """Set up BGP speaker for an individual VLAN if required.
-
-        Args:
-            vlan (vlan): VLAN associated with this speaker.
-        Returns:
-            ryu.services.protocols.bgp.bgpspeaker.BGPSpeaker: BGP speaker.
-        """
-        handler = lambda x: self._bgp_route_handler(x, vlan)
-        bgp_speaker = BGPSpeaker(
-            as_number=vlan.bgp_as,
-            router_id=vlan.bgp_routerid,
-            bgp_server_port=vlan.bgp_port,
-            best_path_change_handler=handler)
-        for controller_ip in vlan.controller_ips:
-            prefix = ipaddr.IPNetwork(
-                '/'.join((str(controller_ip.ip), str(controller_ip.prefixlen))))
-            bgp_speaker.prefix_add(
-                prefix=str(prefix), next_hop=controller_ip.ip)
-        for route_table in (vlan.ipv4_routes, vlan.ipv6_routes):
-            for ip_dst, ip_gw in route_table.iteritems():
-                bgp_speaker.prefix_add(
-                    prefix=str(ip_dst), next_hop=str(ip_gw))
-        bgp_speaker.neighbor_add(
-            address=vlan.bgp_neighbor_address,
-            remote_as=vlan.bgp_neighbor_as)
-        return bgp_speaker
+                            'BGP nexthop %s for prefix %s is not a connected network',
+                            nexthop, prefix)
 
     def _reset_bgp(self):
         """Set up a BGP speaker for every VLAN that requires it."""
         # TODO: port status changes should cause us to withdraw a route.
         # TODO: configurable behavior - withdraw routes if peer goes down.
-        for dp_id, valve in self.valves.iteritems():
-            if dp_id not in self.dp_bgp_speakers:
-                self.dp_bgp_speakers[dp_id] = {}
-            bgp_speakers = self.dp_bgp_speakers[dp_id]
-            for bgp_speaker in bgp_speakers.itervalues():
-                bgp_speaker.shutdown()
-            for vlan in valve.dp.vlans.itervalues():
-                if vlan.bgp_as:
-                    bgp_speakers[vlan] = self._create_bgp_speaker_for_vlan(vlan)
+        if self.bgp_speaker:
+            self.bgp_speaker.shutdown()
+
+        if self.bgp_conf:
+            assert self.bgp_conf['bgp_port']
+            assert self.bgp_conf['bgp_as']
+            assert ipaddr.IPAddress(self.bgp_conf['bgp_routerid'])
+            assert ipaddr.IPAddress(self.bgp_conf['bgp_neighbor_address'])
+            assert self.bgp_conf['bgp_neighbor_as']
+
+            self.bgp_speaker = BGPSpeaker(
+                            as_number=self.bgp_conf['bgp_as'],
+                            router_id=self.bgp_conf['bgp_routerid'],
+                            bgp_server_port=self.bgp_conf['bgp_port'],
+                            best_path_change_handler=self._bgp_route_handler)
+
+            for valve in self.valves.values():
+                for controller_ip in valve.get_controller_ips():
+                    prefix = ipaddr.IPNetwork(
+                            '/'.join((str(controller_ip.ip),
+                                      str(controller_ip.prefixlen))))
+                    self.bgp_speaker.prefix_add(
+                            prefix=str(prefix), next_hop=controller_ip.ip)
+                for route_table in (valve.get_ipv4_routes(),
+                                    valve.get_ipv6_routes()):
+                    for ip_dst, ip_gw in route_table.iteritems():
+                        self.bgp_speaker.prefix_add(
+                                prefix=str(ip_dst), next_hop=str(ip_gw))
+
+            self.bgp_speaker.neighbor_add(
+                    address=self.bgp_conf['bgp_neighbor_address'],
+                    remote_as=self.bgp_conf['bgp_neighbor_as'])
 
     def gateway_resolve_request(self):
         """Trigger gateway/nexthop re/resolution."""
