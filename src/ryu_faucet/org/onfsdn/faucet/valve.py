@@ -161,11 +161,11 @@ class Valve(object):
                        eth_type=None, eth_src=None,
                        eth_dst=None, eth_dst_mask=None,
                        ipv6_nd_target=None, icmpv6_type=None,
-                       nw_proto=None, nw_src=None, nw_dst=None):
+                       nw_proto=None, nw_src=None, nw_dst=None, metadata=None):
         match_dict = valve_of.build_match_dict(
             in_port, vlan, eth_type, eth_src,
             eth_dst, eth_dst_mask, ipv6_nd_target, icmpv6_type,
-            nw_proto, nw_src, nw_dst)
+            nw_proto, nw_src, nw_dst, metadata)
         if table_id != self.dp.acl_table:
             assert table_id in self.TABLE_MATCH_TYPES,\
                 '%u table not registered' % table_id
@@ -819,11 +819,13 @@ class Valve(object):
                     vlan, controller_ip, controller_ip_host))
         return ofmsgs
 
-    def add_route(self, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst, default=True):
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.add_route(ip_gw, ip_dst)
+            return self.ipv6_route_manager.add_route(ip_gw, ip_dst,
+                                                     default=default)
         else:
-            return self.ipv4_route_manager.add_route(ip_gw, ip_dst)
+            return self.ipv4_route_manager.add_route(ip_gw, ip_dst,
+                                                     default=default)
 
     def del_route(self, vlan, ip_dst):
         if ip_dst.version == 6:

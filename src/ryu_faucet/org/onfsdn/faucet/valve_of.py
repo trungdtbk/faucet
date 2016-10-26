@@ -215,7 +215,7 @@ def build_match_dict(in_port=None, vlan=None,
                      eth_dst=None, eth_dst_mask=None,
                      ipv6_nd_target=None, icmpv6_type=None,
                      nw_proto=None,
-                     nw_src=None, nw_dst=None):
+                     nw_src=None, nw_dst=None, metadata=None):
     match_dict = {}
     if in_port is not None:
         match_dict['in_port'] = in_port
@@ -249,6 +249,8 @@ def build_match_dict(in_port=None, vlan=None,
             match_dict['ipv6_dst'] = nw_dst_masked
     if eth_type is not None:
         match_dict['eth_type'] = eth_type
+    if metadata is not None:
+        match_dict['metadata'] = metadata
     return match_dict
 
 
