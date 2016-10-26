@@ -37,6 +37,69 @@ class LinkNeighbor(object):
         self.eth_src = eth_src
         self.cache_time = now
 
+class Route(object):
+
+    def __init__(self, dest):
+        self._dest = dest
+        self._nexthops = set()
+
+    def add_nexthop(self, nexthop):
+        self._nexthops.add(nexthop)
+
+    def del_nexthop(self, nexthop):
+        self._nexthops.discard(nexthop)
+
+    @property
+    def nexthops(self):
+        return self._nexthops
+
+class RouteTable(object):
+
+    def __init__(self):
+        self._routes = {}
+        self._default_routes = {}
+
+    def add_route(self, ip_dst, ip_gw, default=True):
+        """Add a new or update an existing route
+        Return the route object
+        """
+        nexthop_set = self._routes.get(ip_dst, set())
+        nexthop_set.add(ip_gw)
+        self._routes[ip_dst] = nexthop_set
+        if default:
+            self._default_routes[ip_dst] = ip_gw
+
+    def del_route(self, ip_dst):
+        """Delete a route object from the table
+        Return the deleted route
+        """
+        self._routes.pop(ip_dst, None)
+        self._default_routes.pop(ip_dst, None)
+
+    def get_nexthop(self, ip_dst):
+        """Get a route object belonging to ip_dst
+        """
+        return self._default_routes.get(ip_dst, None)
+
+    def del_nexthop(self, ip_dst, ip_gw):
+        """Delete a nexthop belong to a route
+        """
+        nexthop_set = self._routes.get(ip_dst, set())
+        nexthop_set.discard(ip_gw)
+        self._routes[ip_dst] = nexthop_set
+        if ip_gw == self._default_routes.get(ip_dst, None):
+            self._default_routes.pop(ip_dst, None)
+
+    def get_routes(self):
+        return self._default_routes
+
+    def get_nexthops(self):
+        """Return all nexthops
+        """
+        nexthops = set()
+        for nexthop_set in self._routes.itervalues():
+            nexthops.update(nexthop_set)
+        return nexthops
 
 class ValveRouteManager(object):
     """Base class to implement RIB/FIB."""
@@ -63,6 +126,8 @@ class ValveRouteManager(object):
         self.nd_cache = {}
         self.ipv4_routes = {}
         self.ipv6_routes = {}
+
+        self.route_table = RouteTable()
 
     def _vlan_vid(self, vlan, in_port):
         vid = None
@@ -130,7 +195,6 @@ class ValveRouteManager(object):
     def _update_nexthop(self, dp_id, in_port, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
-        routes = self._routes()
         neighbor_cache = self._neighbor_cache()
         if resolved_ip_gw in neighbor_cache:
             cached_eth_dst = neighbor_cache[resolved_ip_gw].eth_src
@@ -138,7 +202,7 @@ class ValveRouteManager(object):
                 is_updated = True
         else:
             is_updated = False
-        for ip_dst, ip_gw in routes.iteritems():
+        for ip_dst, ip_gw in self.get_routes().iteritems():
             if ip_gw == resolved_ip_gw:
                 ofmsgs.extend(self._add_resolved_route(
                     ip_gw, ip_dst, eth_src, is_updated))
@@ -161,9 +225,8 @@ class ValveRouteManager(object):
         ofmsgs = []
         untagged_ports = vlan.untagged_flood_ports(False)
         tagged_ports = vlan.tagged_flood_ports(False)
-        routes = self._routes()
         neighbor_cache = self._neighbor_cache()
-        for ip_gw in set(routes.values()):
+        for ip_gw in set(self.route_table.get_nexthops()):
             for controller_ip in vlan.controller_ips:
                 if ip_gw in controller_ip:
                     cache_age = None
@@ -177,7 +240,7 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst, default=True):
         """Add a route to the RIB.
 
         Args:
@@ -188,9 +251,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._routes()
         neighbor_cache = self._neighbor_cache()
-        routes[ip_dst] = ip_gw
+        self.route_table.add_route(ip_dst=ip_dst, ip_gw=ip_gw, default=default)
         if ip_gw in neighbor_cache:
             eth_dst = neighbor_cache[ip_gw].eth_src
             ofmsgs.extend(self._add_resolved_route(
@@ -211,9 +273,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._routes()
-        if ip_dst in routes:
-            del routes[ip_dst]
+        route = self.route_table.del_route(ip_dst)
+        if route:
             route_match = self.valve_in_match(
                 self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
             ofmsgs.extend(self.valve_flowdel(
@@ -224,7 +285,7 @@ class ValveRouteManager(object):
         pass
 
     def get_routes(self):
-        return self._routes()
+        return self.route_table.get_routes()
 
 class ValveIPv4RouteManager(ValveRouteManager):
     """Implement IPv4 RIB/FIB."""
