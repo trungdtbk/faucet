@@ -35,6 +35,75 @@ class LinkNeighbor(object):
         self.eth_src = eth_src
         self.cache_time = now
 
+class RouteTable(object):
+    """Maintain RIB entries
+    """
+    def __init__(self):
+        self._routes = {}
+        self._default_routes = {}
+
+    def add_route(self, ip_dst, ip_gw, default=True):
+        """Add a new or update an existing route
+        Return the route object
+        """
+        nexthop_set = self._routes.get(ip_dst, set())
+        nexthop_set.add(ip_gw)
+        self._routes[ip_dst] = nexthop_set
+        if default:
+            self._default_routes[ip_dst] = ip_gw
+
+    def del_route(self, ip_dst, ip_gw=None):
+        """Delete a route object from the table
+        Return the deleted route
+        """
+
+        if ip_gw == None:
+            self._routes.pop(ip_dst, None)
+            return self._default_routes.pop(ip_dst, None) is not None
+        else:
+            nexthop_set = self._routes.get(ip_dst, set())
+            if ip_gw in nexthop_set:
+                nexthop_set.remove(ip_gw)
+                self._routes[ip_gw] = nexthop_set
+
+                if ip_gw == self._default_routes.get(ip_dst):
+                    self._default_routes.pop(ip_dst, None)
+                return True
+
+        return False
+
+    def get_nexthops(self, ip_dst):
+        """Get a route object belonging to ip_dst
+        """
+        return self._routes.get(ip_dst, set())
+
+    def get_default_nexthop(self, ip_dst):
+        return self._default_routes.get(ip_dst, None)
+
+    def del_nexthop(self, ip_dst, ip_gw):
+        """Delete a nexthop belong to a route
+        """
+        nexthop_set = self._routes.get(ip_dst, set())
+        nexthop_set.discard(ip_gw)
+        self._routes[ip_dst] = nexthop_set
+        if ip_gw == self._default_routes.get(ip_dst, None):
+            self._default_routes.pop(ip_dst, None)
+
+    def get_default_routes(self):
+        return self._default_routes
+
+    def get_routes(self):
+        return self._routes
+
+    def get_all_gw(self):
+        """Return all nexthops
+        """
+        nexthops = set()
+        for nexthop_set in self._routes.itervalues():
+            nexthops.update(nexthop_set)
+        return nexthops
+
+
 class ValveRouteManager(object):
     """Base class to implement RIB/FIB."""
 
@@ -56,10 +125,10 @@ class ValveRouteManager(object):
 
         self.arp_cache = {}
         self.nd_cache = {}
-        self.ipv4_routes = {}
-        self.ipv6_routes = {}
         # Map ip_gw with group id
         self.ip_gw_to_group_id = {}
+
+        self.routes = RouteTable()
 
     def _vlan_vid(self, vlan, in_port):
         vid = None
@@ -93,7 +162,7 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated=None):
+    def _add_resolved_route(self, ip_gw, ip_dst, eth_dst, is_updated=None):
         ofmsgs = []
         if is_updated is not None:
             in_match = self.valve_in_match(
@@ -122,7 +191,7 @@ class ValveRouteManager(object):
     def _update_nexthop(self, vlan, in_port, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
-        routes = self._routes()
+        routes = self.routes.get_default_routes()
         neighbor_cache = self._neighbor_cache()
         group_cmd = None
         group_id = None
@@ -164,7 +233,7 @@ class ValveRouteManager(object):
             for ip_dst, ip_gw in routes.iteritems():
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
-                        vlan, ip_gw, ip_dst, eth_src, is_updated))
+                        ip_gw, ip_dst, eth_src, is_updated))
 
         now = time.time()
         link_neighbor = LinkNeighbor(eth_src, now)
@@ -184,9 +253,8 @@ class ValveRouteManager(object):
         ofmsgs = []
         untagged_ports = vlan.untagged_flood_ports(False)
         tagged_ports = vlan.tagged_flood_ports(False)
-        routes = self._routes()
         neighbor_cache = self._neighbor_cache()
-        for ip_gw in set(routes.values()):
+        for ip_gw in set(self.routes.get_all_gw()):
             for controller_ip in vlan.controller_ips:
                 if ip_gw in controller_ip:
                     cache_age = None
@@ -200,7 +268,7 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst, default=True):
         """Add a route to the RIB.
 
         Args:
@@ -210,20 +278,23 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._routes()
-        routes[ip_dst] = ip_gw
+        self.routes.add_route(ip_gw=ip_gw, ip_dst=ip_dst, default=default)
         neighbor_cache = self._neighbor_cache()
         if ip_gw in neighbor_cache:
-            eth_dst = neighbor_cache[ip_gw].eth_src
-            ofmsgs.extend(self._add_resolved_route(
-                ip_gw=ip_gw,
-                ip_dst=ip_dst,
-                eth_dst=eth_dst,
-                is_updated=False))
+            if default:
+                eth_dst = neighbor_cache[ip_gw].eth_src
+                ofmsgs.extend(self._add_resolved_route(
+                    ip_gw=ip_gw,
+                    ip_dst=ip_dst,
+                    eth_dst=eth_dst,
+                    is_updated=False))
+            else:
+                # TODO: Handle multipath forwarding
+                pass
 
         return ofmsgs
 
-    def del_route(self, ip_dst):
+    def del_route(self, ip_dst, ip_gw=None):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
@@ -234,15 +305,14 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._routes()
-        if ip_dst in routes:
-            del routes[ip_dst]
+        if self.routes.del_route(ip_dst, ip_gw):
             route_match = self.valve_in_match(
                 self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
             ofmsgs.extend(self.valve_flowdel(
                 self.fib_table, route_match))
-
-        # TODO: Delete the group that has no fib entry pointing to.
+        else:
+            #TODO: handle multipath forwarding
+            pass
 
         return ofmsgs
 
@@ -255,9 +325,6 @@ class ValveIPv4RouteManager(ValveRouteManager):
 
     def _eth_type(self):
         return ether.ETH_TYPE_IP
-
-    def _routes(self):
-        return self.ipv4_routes
 
     def _neighbor_cache(self):
         return self.arp_cache
@@ -358,9 +425,6 @@ class ValveIPv6RouteManager(ValveRouteManager):
 
     def _eth_type(self):
         return ether.ETH_TYPE_IPV6
-
-    def _routes(self):
-        return self.ipv6_routes
 
     def _neighbor_cache(self):
         return self.nd_cache
