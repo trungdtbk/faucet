@@ -776,15 +776,16 @@ vlans:
     100:
         description: "untagged"
         controller_ips: ["10.0.0.254/24"]
-        bgp_port: 9179
-        bgp_as: 1
-        bgp_routerid: "1.1.1.1"
-        bgp_neighbor_address: "127.0.0.1"
-        bgp_neighbor_as: 2
-        routes:
-            - route:
-                ip_dst: 10.99.99.0/24
-                ip_gw: 10.0.0.1
+bgp:
+    bgp_port: 9179
+    bgp_as: 1
+    bgp_routerid: "1.1.1.1"
+    bgp_neighbor_address: "127.0.0.1"
+    bgp_neighbor_as: 2
+routes:
+    - route:
+        ip_dst: 10.99.99.0/24
+        ip_gw: 10.0.0.1
 """
 
     CONFIG = """
@@ -841,21 +842,22 @@ vlans:
     100:
         description: "untagged"
         controller_ips: ["10.0.0.254/24"]
-        bgp_port: 9179
-        bgp_as: 1
-        bgp_routerid: "1.1.1.1"
-        bgp_neighbor_address: "127.0.0.1"
-        bgp_neighbor_as: 2
-        routes:
-            - route:
-                ip_dst: "10.0.1.0/24"
-                ip_gw: "10.0.0.1"
-            - route:
-                ip_dst: "10.0.2.0/24"
-                ip_gw: "10.0.0.2"
-            - route:
-                ip_dst: "10.0.3.0/24"
-                ip_gw: "10.0.0.2"
+bgp:
+    bgp_port: 9179
+    bgp_as: 1
+    bgp_routerid: "1.1.1.1"
+    bgp_neighbor_address: "127.0.0.1"
+    bgp_neighbor_as: 2
+routes:
+    - route:
+        ip_dst: "10.0.1.0/24"
+        ip_gw: "10.0.0.1"
+    - route:
+        ip_dst: "10.0.2.0/24"
+        ip_gw: "10.0.0.2"
+    - route:
+        ip_dst: "10.0.3.0/24"
+        ip_gw: "10.0.0.2"
 """
 
     CONFIG = """
@@ -1489,16 +1491,16 @@ vlans:
     100:
         description: "tagged"
         controller_ips: ["10.0.0.254/24"]
-        routes:
-            - route:
-                ip_dst: "10.0.1.0/24"
-                ip_gw: "10.0.0.1"
-            - route:
-                ip_dst: "10.0.2.0/24"
-                ip_gw: "10.0.0.2"
-            - route:
-                ip_dst: "10.0.3.0/24"
-                ip_gw: "10.0.0.2"
+routes:
+    - route:
+        ip_dst: "10.0.1.0/24"
+        ip_gw: "10.0.0.1"
+    - route:
+        ip_dst: "10.0.2.0/24"
+        ip_gw: "10.0.0.2"
+    - route:
+        ip_dst: "10.0.3.0/24"
+        ip_gw: "10.0.0.2"
 """
 
     CONFIG = """
@@ -1594,13 +1596,13 @@ vlans:
     100:
         description: "untagged"
         controller_ips: ["fc00::10:1/112", "fc00::20:1/112"]
-        routes:
-            - route:
-                ip_dst: "fc00::10:0/112"
-                ip_gw: "fc00::10:2"
-            - route:
-                ip_dst: "fc00::20:0/112"
-                ip_gw: "fc00::20:2"
+routes:
+    - route:
+        ip_dst: "fc00::10:0/112"
+        ip_gw: "fc00::10:2"
+    - route:
+        ip_dst: "fc00::20:0/112"
+        ip_gw: "fc00::20:2"
 """
 
     CONFIG = """
@@ -1649,21 +1651,22 @@ vlans:
     100:
         description: "untagged"
         controller_ips: ["fc00::1:254/112"]
-        bgp_port: 9179
-        bgp_as: 1
-        bgp_routerid: "1.1.1.1"
-        bgp_neighbor_address: "::1"
-        bgp_neighbor_as: 2
-        routes:
-            - route:
-                ip_dst: "fc00::10:0/112"
-                ip_gw: "fc00::1:1"
-            - route:
-                ip_dst: "fc00::20:0/112"
-                ip_gw: "fc00::1:2"
-            - route:
-                ip_dst: "fc00::30:0/112"
-                ip_gw: "fc00::1:2"
+bgp:
+    bgp_port: 9179
+    bgp_as: 1
+    bgp_routerid: "1.1.1.1"
+    bgp_neighbor_address: "::1"
+    bgp_neighbor_as: 2
+routes:
+    - route:
+        ip_dst: "fc00::10:0/112"
+        ip_gw: "fc00::1:1"
+    - route:
+        ip_dst: "fc00::20:0/112"
+        ip_gw: "fc00::1:2"
+    - route:
+        ip_dst: "fc00::30:0/112"
+        ip_gw: "fc00::1:2"
 """
 
     CONFIG = """
@@ -1723,13 +1726,13 @@ vlans:
     100:
         description: "tagged"
         controller_ips: ["fc00::1:254/112"]
-        routes:
-            - route:
-                ip_dst: "fc00::10:0/112"
-                ip_gw: "fc00::1:1"
-            - route:
-                ip_dst: "fc00::20:0/112"
-                ip_gw: "fc00::1:2"
+routes:
+    - route:
+        ip_dst: "fc00::10:0/112"
+        ip_gw: "fc00::1:1"
+    - route:
+        ip_dst: "fc00::20:0/112"
+        ip_gw: "fc00::1:2"
 """
 
     CONFIG = """
