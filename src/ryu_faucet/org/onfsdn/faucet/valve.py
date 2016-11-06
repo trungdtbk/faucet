@@ -717,6 +717,7 @@ class Valve(object):
             self.dp = new_dp
             ofmsgs = self.datapath_connect(
                 self.dp.dp_id, self.dp.ports.keys())
+
         return ofmsgs
 
     def _add_controller_ips(self, controller_ips, vlan):
@@ -734,17 +735,17 @@ class Valve(object):
                     vlan, controller_ip, controller_ip_host))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst):
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.add_route(vlan, ip_gw, ip_dst)
+            return self.ipv6_route_manager.add_route(ip_gw, ip_dst)
         else:
-            return self.ipv4_route_manager.add_route(vlan, ip_gw, ip_dst)
+            return self.ipv4_route_manager.add_route(ip_gw, ip_dst)
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, ip_dst):
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.del_route(vlan, ip_dst)
+            return self.ipv6_route_manager.del_route(ip_dst)
         else:
-            return self.ipv4_route_manager.del_route(vlan, ip_dst)
+            return self.ipv4_route_manager.del_route(ip_dst)
 
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.
@@ -761,6 +762,17 @@ class Valve(object):
             ofmsgs.extend(self.ipv6_route_manager.resolve_gateways(vlan, now))
         return ofmsgs
 
+    def get_controller_ips(self):
+        controller_ips = []
+        for vlan in self.dp.vlans.itervalues():
+            controller_ips.extend(vlan.controller_ips)
+        return controller_ips
+
+    def get_ipv4_routes(self):
+        return self.ipv4_route_manager.ipv4_routes
+
+    def get_ipv6_routes(self):
+        return self.ipv6_route_manager.ipv6_routes
 
 class ArubaValve(Valve):
 

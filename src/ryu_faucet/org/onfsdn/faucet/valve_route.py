@@ -55,6 +55,11 @@ class ValveRouteManager(object):
         self.valve_flowmod = valve_flowmod
         self.valve_flowcontroller = valve_flowcontroller
 
+        self.arp_cache = {}
+        self.nd_cache = {}
+        self.ipv4_routes = {}
+        self.ipv6_routes = {}
+
     def _vlan_vid(self, vlan, in_port):
         vid = None
         if vlan.port_is_tagged(in_port):
@@ -65,10 +70,10 @@ class ValveRouteManager(object):
         """Return EtherType for FIB entries."""
         pass
 
-    def _vlan_routes(self, vlan):
+    def _routes(self):
         pass
 
-    def _vlan_neighbor_cache(self, vlan):
+    def _neighbor_cache(self):
         pass
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
@@ -87,12 +92,11 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated=None):
+    def _add_resolved_route(self, ip_gw, ip_dst, eth_dst, is_updated=None):
         ofmsgs = []
         if is_updated is not None:
             in_match = self.valve_in_match(
-                self.fib_table, vlan=vlan,
-                eth_type=self._eth_type(), nw_dst=ip_dst)
+                self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
             prefixlen = ipaddr.IPNetwork(ip_dst).prefixlen
             priority = self.route_priority + prefixlen
             if is_updated:
@@ -119,15 +123,15 @@ class ValveRouteManager(object):
                 [valve_of.goto_table(self.eth_dst_table)]))
         now = time.time()
         link_neighbor = LinkNeighbor(eth_dst, now)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        neighbor_cache = self._neighbor_cache()
         neighbor_cache[ip_gw] = link_neighbor
         return ofmsgs
 
     def _update_nexthop(self, vlan, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
-        routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        routes = self._routes()
+        neighbor_cache = self._neighbor_cache()
         if resolved_ip_gw in neighbor_cache:
             cached_eth_dst = neighbor_cache[resolved_ip_gw].eth_src
             if cached_eth_dst != eth_src:
@@ -137,7 +141,8 @@ class ValveRouteManager(object):
         for ip_dst, ip_gw in routes.iteritems():
             if ip_gw == resolved_ip_gw:
                 ofmsgs.extend(self._add_resolved_route(
-                    vlan, ip_gw, ip_dst, eth_src, is_updated))
+                    ip_gw, ip_dst, eth_src, is_updated))
+
         return ofmsgs
 
     def resolve_gateways(self, vlan, now):
@@ -152,8 +157,8 @@ class ValveRouteManager(object):
         ofmsgs = []
         untagged_ports = vlan.untagged_flood_ports(False)
         tagged_ports = vlan.tagged_flood_ports(False)
-        routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        routes = self._routes()
+        neighbor_cache = self._neighbor_cache()
         for ip_gw in set(routes.values()):
             for controller_ip in vlan.controller_ips:
                 if ip_gw in controller_ip:
@@ -168,48 +173,44 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst):
         """Add a route to the RIB.
 
         Args:
-            vlan (vlan): VLAN containing this RIB.
             ip_gw (ipaddr.IPAddress): IP address of nexthop.
             ip_dst (ipaddr.IPNetwork): destination IP network.
         Returns:
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._vlan_routes(vlan)
-        neighbor_cache = self._vlan_neighbor_cache(vlan)
+        routes = self._routes()
         routes[ip_dst] = ip_gw
+        neighbor_cache = self._neighbor_cache()
         if ip_gw in neighbor_cache:
             eth_dst = neighbor_cache[ip_gw].eth_src
             ofmsgs.extend(self._add_resolved_route(
-                vlan=vlan,
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
                 eth_dst=eth_dst,
                 is_updated=False))
         return ofmsgs
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, ip_dst):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
 
         Args:
-            vlan (vlan): VLAN containing this RIB.
             ip_dst (ipaddr.IPNetwork): destination IP network.
         Returns:
             list: OpenFlow messages.
         """
         ofmsgs = []
-        routes = self._vlan_routes(vlan)
+        routes = self._routes()
         if ip_dst in routes:
             del routes[ip_dst]
             route_match = self.valve_in_match(
-                self.fib_table, vlan=vlan,
-                eth_type=self._eth_type(), nw_dst=ip_dst)
+                self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
             ofmsgs.extend(self.valve_flowdel(
                 self.fib_table, route_match))
         return ofmsgs
@@ -224,11 +225,11 @@ class ValveIPv4RouteManager(ValveRouteManager):
     def _eth_type(self):
         return ether.ETH_TYPE_IP
 
-    def _vlan_routes(self, vlan):
-        return vlan.ipv4_routes
+    def _routes(self):
+        return self.ipv4_routes
 
-    def _vlan_neighbor_cache(self, vlan):
-        return vlan.arp_cache
+    def _neighbor_cache(self):
+        return self.arp_cache
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
         return valve_packet.arp_request(
@@ -327,11 +328,11 @@ class ValveIPv6RouteManager(ValveRouteManager):
     def _eth_type(self):
         return ether.ETH_TYPE_IPV6
 
-    def _vlan_routes(self, vlan):
-        return vlan.ipv6_routes
+    def _routes(self):
+        return self.ipv6_routes
 
-    def _vlan_neighbor_cache(self, vlan):
-        return vlan.nd_cache
+    def _neighbor_cache(self):
+        return self.nd_cache
 
     def _neighbor_resolver_pkt(self, vid, controller_ip, ip_gw):
         return valve_packet.nd_request(

@@ -40,6 +40,20 @@ def config_file_hash(config_file_name):
     config_file = open(config_file_name)
     return hashlib.sha256(config_file.read()).hexdigest()
 
+def bgp_parser(config_file, logname):
+    logger = get_logger(logname)
+    conf = read_config(config_file, logname)
+    if conf is not None:
+        return conf.pop('bgp', {})
+    return None
+
+def route_parser(config_file, logname):
+    logger = get_logger(logname)
+    conf = read_config(config_file, logname)
+    if conf is not None:
+        return conf.pop('routes', {})
+    return None
+
 def dp_parser(config_file, logname):
     logger = get_logger(logname)
     conf = read_config(config_file, logname)
@@ -202,12 +216,6 @@ def _dp_include(config_hashes, parent_file, config_file, dps_conf, vlans_conf, a
 def _dp_add_vlan(vid_dp, dp, vlan, logname):
     if vlan.vid not in vid_dp:
         vid_dp[vlan.vid] = set()
-
-    if len(vid_dp[vlan.vid]) > 1:
-        assert not vlan.bgp_routerid, \
-                "DPs {0} sharing a BGP speaker VLAN is unsupported".format(
-                    str.join(", ", vid_dp[vlan.vid]),
-                )
 
     if vlan not in dp.vlans:
         dp.add_vlan(vlan)

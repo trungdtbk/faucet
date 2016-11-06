@@ -23,19 +23,7 @@ class VLAN(Conf):
     untagged = None
     vid = None
     controller_ips = None
-    ipv4_routes = None
-    ipv6_routes = None
-    arp_cache = None
-    nd_cache = None
     host_cache = None
-    bgp_as = None
-    bgp_port = None
-    bgp_routerid = None
-    bgp_neighbor_address = None
-    bgp_neighbour_address = None
-    bgp_neighbor_as = None
-    bgp_neighbour_as = None
-    routes = None
     max_hosts = None
 
     defaults = {
@@ -43,14 +31,6 @@ class VLAN(Conf):
         'description': None,
         'controller_ips': None,
         'unicast_flood': True,
-        'bgp_as': 0,
-        'bgp_port': 9179,
-        'bgp_routerid': '',
-        'bgp_neighbour_address': '',
-        'bgp_neighbor_address': None,
-        'bgp_neighbour_as': 0,
-        'bgp_neighbor_as': None,
-        'routes': None,
         'max_hosts': None,
         }
 
@@ -65,32 +45,11 @@ class VLAN(Conf):
         self._id = _id
         self.tagged = []
         self.untagged = []
-        self.ipv4_routes = {}
-        self.ipv6_routes = {}
-        self.arp_cache = {}
-        self.nd_cache = {}
         self.host_cache = {}
 
         if self.controller_ips:
             self.controller_ips = [
                 ipaddr.IPNetwork(ip) for ip in self.controller_ips]
-
-        if self.bgp_as:
-            assert self.bgp_port
-            assert ipaddr.IPv4Address(self.bgp_routerid)
-            assert ipaddr.IPAddress(self.bgp_neighbor_address)
-            assert self.bgp_neighbor_as
-
-        if self.routes:
-            self.routes = [route['route'] for route in self.routes]
-            for route in self.routes:
-                ip_gw = ipaddr.IPAddress(route['ip_gw'])
-                ip_dst = ipaddr.IPNetwork(route['ip_dst'])
-                assert ip_gw.version == ip_dst.version
-                if ip_gw.version == 4:
-                    self.ipv4_routes[ip_dst] = ip_gw
-                else:
-                    self.ipv6_routes[ip_dst] = ip_gw
 
     def set_defaults(self):
         for key, value in self.defaults.iteritems():
@@ -98,8 +57,6 @@ class VLAN(Conf):
         self._set_default('vid', self._id)
         self._set_default('name', str(self._id))
         self._set_default('controller_ips', [])
-        self._set_default('bgp_neighbor_as', self.bgp_neighbour_as)
-        self._set_default('bgp_neighbor_address', self.bgp_neighbour_address)
 
     def __str__(self):
         port_list = [str(x) for x in self.get_ports()]
