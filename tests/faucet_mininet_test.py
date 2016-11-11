@@ -403,6 +403,30 @@ dps:
             return [json.dumps(flow) for flow in flow_dump]
         return []
 
+    def get_matching_flow(self, exp_flow, timeout=10):
+        for _ in range(timeout):
+            flow_dump = self.get_all_flows_from_dpid(self.dpid, timeout)
+            for flow in flow_dump:
+                if re.search(exp_flow, flow):
+                    return json.loads(flow)
+            time.sleep(1)
+        return None
+
+    def get_all_groups_desc_from_dpid(self, dpid, timeout=2):
+        int_dpid = str_int_dpid(dpid)
+        for _ in range(timeout):
+            try:
+                ofctl_result = json.loads(requests.get(
+                    '%s/stats/groupdesc/%s' % (self.ofctl_rest_url(),
+                                               int_dpid)).text)
+                flow_dump = ofctl_result[int_dpid]
+                return [json.dumps(flow) for flow in flow_dump]
+            except (ValueError, requests.exceptions.ConnectionError):
+                # Didn't get valid JSON, try again
+                time.sleep(1)
+                continue
+        return []
+
     def matching_flow_present_on_dpid(self, dpid, exp_flow, timeout=10):
         for _ in range(timeout):
             flow_dump = self.get_all_flows_from_dpid(dpid, timeout)
@@ -433,6 +457,17 @@ dps:
             self.require_host_learned(host)
         self.assertEquals(0, self.net.pingAll())
 
+
+    def wait_until_matching_in_group_table(self, exp_group, timeout):
+        for _ in range(timeout):
+            group_dump = self.get_all_groups_desc_from_dpid(self.dpid, 1)
+            for group_desc in group_dump:
+                if re.search(exp_group, group_desc):
+                    return True
+            time.sleep(1)
+
+        self.assertTrue(False, 'Group matching %s not found' % exp_group)
+
     def wait_until_matching_route_as_flow(self, nexthop, prefix, timeout=5):
         if prefix.version == 6:
             exp_prefix = '/'.join(
@@ -441,8 +476,11 @@ dps:
         else:
             exp_prefix = prefix.masked().with_netmask
             nw_dst_match = '"nw_dst": "%s"' % exp_prefix
-        self.wait_until_matching_flow(
-            'SET_FIELD: {eth_dst:%s}.+%s' % (nexthop, nw_dst_match), timeout)
+        flow = self.get_matching_flow(nw_dst_match, timeout)
+        self.assertTrue(flow is not None)
+        group_id = int(re.findall(r'\d+', str(flow['actions']))[0])
+        self.wait_until_matching_in_group_table(
+                'SET_FIELD: {eth_dst:%s}.+%d' % (nexthop, group_id), timeout)
 
     def curl_portmod(self, int_dpid, port_no, config, mask):
         # TODO: avoid dependency on varying 'requests' library.
