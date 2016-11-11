@@ -261,6 +261,8 @@ class Valve(object):
         ofmsgs = []
         for table_id in self._all_valve_tables():
             ofmsgs.extend(self.valve_flowdel(table_id))
+
+        ofmsgs.append(valve_of.groupdel())
         return ofmsgs
 
     def _delete_all_port_match_flows(self, port):
