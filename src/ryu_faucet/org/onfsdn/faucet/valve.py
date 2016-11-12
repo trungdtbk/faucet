@@ -446,7 +446,6 @@ class Valve(object):
                 self.dp.vlan_table, in_port=port.number, vlan=vlan_vid),
             priority=self.dp.low_priority,
             inst=vlan_inst))
-        ofmsgs.extend(self.flood_manager.build_flood_rules(vlan))
         return ofmsgs
 
     def _port_add_vlan_untagged(self, port, vlan, forwarding_table, mirror_act):
