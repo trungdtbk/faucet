@@ -403,14 +403,27 @@ dps:
             return [json.dumps(flow) for flow in flow_dump]
         return []
 
-    def get_matching_flow(self, exp_flow, timeout=10):
+    def get_group_id_for_matching_flow(self, exp_flow, timeout=10):
         for _ in range(timeout):
             flow_dump = self.get_all_flows_from_dpid(self.dpid, timeout)
             for flow in flow_dump:
                 if re.search(exp_flow, flow):
-                    return json.loads(flow)
+                    flow = json.loads(flow)
+                    group_id = int(re.findall(r'\d+', str(flow['actions']))[0])
+                    return group_id
             time.sleep(1)
-        return None
+        self.assertTrue(False,
+                "Can't find group_id for matching flow %s" % exp_flow)
+
+    def matching_in_group_table(self, exp_flow, group_id, timeout=5):
+        exp_group = '%s.+"group_id": %d' % (exp_flow, group_id)
+        for _ in range(timeout):
+            group_dump = self.get_all_groups_desc_from_dpid(self.dpid, 1)
+            for group_desc in group_dump:
+                if re.search(exp_group, group_desc):
+                    return True
+            time.sleep(1)
+        return False
 
     def get_all_groups_desc_from_dpid(self, dpid, timeout=2):
         int_dpid = str_int_dpid(dpid)
@@ -457,16 +470,10 @@ dps:
             self.require_host_learned(host)
         self.assertEquals(0, self.net.pingAll())
 
-
-    def wait_until_matching_in_group_table(self, exp_group, timeout):
-        for _ in range(timeout):
-            group_dump = self.get_all_groups_desc_from_dpid(self.dpid, 1)
-            for group_desc in group_dump:
-                if re.search(exp_group, group_desc):
-                    return True
-            time.sleep(1)
-
-        self.assertTrue(False, 'Group matching %s not found' % exp_group)
+    def wait_until_matching_in_group_table(self, exp_flow, group_id, timeout):
+        self.assertTrue(
+                self.matching_in_group_table(exp_flow, group_id, timeout),
+                'Group matching %s in group %d not found' % (exp_flow, group_id))
 
     def wait_until_matching_route_as_flow(self, nexthop, prefix, timeout=5):
         if prefix.version == 6:
@@ -476,11 +483,9 @@ dps:
         else:
             exp_prefix = prefix.masked().with_netmask
             nw_dst_match = '"nw_dst": "%s"' % exp_prefix
-        flow = self.get_matching_flow(nw_dst_match, timeout)
-        self.assertTrue(flow is not None)
-        group_id = int(re.findall(r'\d+', str(flow['actions']))[0])
+        group_id = self.get_group_id_for_matching_flow(nw_dst_match, timeout)
         self.wait_until_matching_in_group_table(
-                'SET_FIELD: {eth_dst:%s}.+%d' % (nexthop, group_id), timeout)
+                '"SET_FIELD: {eth_dst:%s}"' % nexthop, group_id, timeout)
 
     def curl_portmod(self, int_dpid, port_no, config, mask):
         # TODO: avoid dependency on varying 'requests' library.
@@ -1073,12 +1078,9 @@ vlans:
     def test_untagged(self):
         self.assertTrue(self.bogus_mac_flooded_to_port1())
         # Unicast flooding rule for from port 1
-        self.assertTrue(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # Unicast flood rule exists that output to port 1
-        self.assertTrue(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+        flow_match = '"table_id": 6, "match": {"dl_vlan": "100"}'
+        group_id = self.get_group_id_for_matching_flow(flow_match)
+        self.assertTrue(self.matching_in_group_table('"OUTPUT:1"', group_id))
 
 class FaucetUntaggedNoVLanUnicastFloodTest(FaucetUntaggedTest):
 
@@ -1109,10 +1111,7 @@ vlans:
         self.assertFalse(self.bogus_mac_flooded_to_port1())
         # No unicast flooding rule for from port 1
         self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # No unicast flood rule exists that output to port 1
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
+            '"table_id": 6, "match": {"dl_vlan": "100"}'))
 
 
 class FaucetUntaggedPortUnicastFloodTest(FaucetUntaggedTest):
@@ -1145,13 +1144,8 @@ vlans:
         # VLAN level config to disable flooding takes precedence,
         # cannot enable port-only flooding.
         self.assertFalse(self.bogus_mac_flooded_to_port1())
-        # No unicast flooding rule for from port 1
         self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # No unicast flood rule exists that output to port 1
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+            '"table_id": 6, "match": {"dl_vlan": "100"}'))
 
 class FaucetUntaggedNoPortUnicastFloodTest(FaucetUntaggedTest):
 
@@ -1181,17 +1175,10 @@ vlans:
 
     def test_untagged(self):
         self.assertFalse(self.bogus_mac_flooded_to_port1())
-        # Unicast flood rule present for port 2, but NOT for port 1
-        self.assertTrue(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 2}'))
-        self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
         # Unicast flood rules present that output to port 2, but NOT to port 1
-        self.assertTrue(self.matching_flow_present(
-            '"OUTPUT:2".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+        flow_match = '"table_id": 6, "match": {"dl_vlan": "100"}'
+        group_id = self.get_group_id_for_matching_flow(flow_match)
+        self.assertFalse(self.matching_in_group_table('"OUTPUT:1"', group_id))
 
 class FaucetUntaggedHostMoveTest(FaucetUntaggedTest):
 
