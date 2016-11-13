@@ -363,6 +363,8 @@ class Valve(object):
         for table_id in tables:
             ofmsgs.extend(self.valve_flowdel(table_id,
                                match=self.valve_in_match(table_id, vlan=vlan)))
+        for group_id in (vlan.vid, vlan.vid + valve_of.VLAN_GROUP_OFFSET):
+            ofmsgs.append(valve_of.groupdel(group_id))
         self.logger.info("Delete VLAN %s", vlan)
         return ofmsgs
 

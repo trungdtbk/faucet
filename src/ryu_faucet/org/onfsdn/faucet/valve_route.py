@@ -134,7 +134,8 @@ class ValveRouteManager(object):
             is_updated = False
             # Create a new group in group table
             group_cmd = valve_of.groupadd
-            group_id = hash(int(resolved_ip_gw))  & ((1<<32) -1)
+            group_id = (hash(int(resolved_ip_gw))  & ((1<<32) -1)) +\
+                    valve_of.ROUTE_GROUP_OFFSET
             self.ip_gw_to_group_id[resolved_ip_gw] = group_id
 
         if is_updated is not None:

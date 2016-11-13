@@ -47,13 +47,31 @@ class ValveFloodManager(object):
         self.towards_root_stack_ports = []
         self.away_from_root_stack_ports = []
         my_root_distance = dp_shortest_path_to_root()
-        for port in self.stack_ports:
-            peer_dp = port.stack['dp']
-            peer_root_distance = peer_dp.shortest_path_to_root()
-            if peer_root_distance > my_root_distance:
-                self.away_from_root_stack_ports.append(port)
-            elif peer_root_distance < my_root_distance:
-                self.towards_root_stack_ports.append(port)
+
+        self.stack_blocked_ports = set()
+        if not self._dp_is_root:
+            # Find the root port
+            root_port = None
+            for port in self.stack_ports:
+                peer_dp = port.stack['dp']
+                peer_root_distance = peer_dp.shortest_path_to_root()
+                if root_port is None:
+                    root_port = port
+                else:
+                    if peer_root_distance < my_root_distance:
+                        if port.number < root_port.numer:
+                            root_port = port
+            # Find blocked and unblocked ports.
+            # A port will be blocked if it's connected to a non-root port of a peer
+            # Otherwise, it is unblocked
+            for port in self.stack_ports:
+                peer_dp = port.stack['dp']
+                peer_root_distance = peer_dp.shortest_path_to_root()
+                if port != root_port:
+                    if peer_root_distance < my_root_distance:
+                        self.stack_blocked_ports.add(port)
+                    else:
+                        self.stack_blocked_ports.add(port)
 
     def _build_flood_port_outputs(self, ports, exclude_port):
         flood_acts = []
@@ -213,19 +231,86 @@ class ValveFloodManager(object):
         # to all ports except the input port. When all vendors implement
         # groups correctly we can use them.
         command = ofp.OFPFC_ADD
+        group_command = valve_of.groupadd
         if modify:
             command = ofp.OFPFC_MODIFY_STRICT
+            group_command = valve_of.groupmod
         flood_priority = self.flood_priority
         ofmsgs = []
+        # We need two buckets, one for broadcast flood and one for unicast flood
+        broadcast_buckets = []
+        unicast_buckets = []
+        """
+        if not a stack switch:
+            flood to all ports (not the in_port)
+        else:
+            if dp is root:
+                safe to flood to all ports
+            else:
+                flood to all port except away_from_root_stack_ports
+        """
+        broadcast_flood_tagged_ports = set()
+        broadcast_flood_untagged_ports = set()
+        unicast_flood_tagged_ports = set()
+        unicast_flood_untagged_ports = set()
+
+        broadcast_flood_tagged_ports.update(vlan.tagged_flood_ports(False))
+        broadcast_flood_untagged_ports.update(vlan.untagged_flood_ports(False))
+        unicast_flood_tagged_ports.update(
+                vlan.tagged_flood_ports(vlan.unicast_flood))
+        unicast_flood_untagged_ports.update(
+                vlan.untagged_flood_ports(vlan.unicast_flood))
+
+        broadcast_flood_tagged_ports.update(self.stack_ports)
+        unicast_flood_tagged_ports.update(self.stack_ports)
+
+        for port in self.stack_blocked_ports:
+            broadcast_flood_tagged_ports.discard(port)
+            unicast_flood_tagged_ports.discard(port)
+
+        for port in broadcast_flood_tagged_ports:
+            broadcast_buckets.append(valve_of.bucket(
+                actions=[valve_of.output_port(port.number)]))
+        for port in unicast_flood_tagged_ports:
+            unicast_buckets.append(valve_of.bucket(
+                actions=[valve_of.output_port(port.number)]))
+
+        for port in broadcast_flood_untagged_ports:
+            broadcast_buckets.append(valve_of.bucket(
+                actions=[valve_of.pop_vlan(),
+                         valve_of.output_port(port.number)]))
+        for port in unicast_flood_untagged_ports:
+            unicast_buckets.append(valve_of.bucket(
+                actions=[valve_of.pop_vlan(),
+                         valve_of.output_port(port.number)]))
+
+        group_id = vlan.vid
+        ofmsgs.append(group_command(
+                            group_id=group_id, buckets=broadcast_buckets))
+        if unicast_buckets:
+            ofmsgs.append(group_command(
+                                group_id=group_id + valve_of.VLAN_GROUP_OFFSET,
+                                buckets=unicast_buckets))
+
         for unicast_eth_dst, eth_dst, eth_dst_mask in self.FLOOD_DSTS:
             if unicast_eth_dst and not vlan.unicast_flood:
                 continue
-            ofmsgs.extend(self._build_unmirrored_flood_rules(
-                vlan, eth_dst, eth_dst_mask,
-                unicast_eth_dst, command, flood_priority))
+
+            match = self.valve_in_match(
+                    self.flood_table, vlan=vlan,
+                    eth_dst=eth_dst, eth_dst_mask=eth_dst_mask)
+
+            group_id_ = group_id
+            if not eth_dst and unicast_buckets:
+                group_id_ = group_id + valve_of.VLAN_GROUP_OFFSET
+
+            ofmsgs.append(self.valve_flowmod(
+                self.flood_table,
+                match=match,
+                command=command,
+                inst=[valve_of.apply_actions([valve_of.group_act(group_id_)])],
+                priority=flood_priority))
+
             flood_priority += 1
-            ofmsgs.extend(self._build_mirrored_flood_rules(
-                vlan, eth_dst, eth_dst_mask,
-                unicast_eth_dst, command, flood_priority))
-            flood_priority += 1
+
         return ofmsgs
