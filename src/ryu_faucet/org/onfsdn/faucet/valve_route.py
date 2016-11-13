@@ -35,7 +35,6 @@ class LinkNeighbor(object):
         self.eth_src = eth_src
         self.cache_time = now
 
-
 class ValveRouteManager(object):
     """Base class to implement RIB/FIB."""
 
@@ -59,6 +58,8 @@ class ValveRouteManager(object):
         self.nd_cache = {}
         self.ipv4_routes = {}
         self.ipv6_routes = {}
+        # Map ip_gw with group id
+        self.ip_gw_to_group_id = {}
 
     def _vlan_vid(self, vlan, in_port):
         vid = None
@@ -92,7 +93,7 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, ip_gw, ip_dst, eth_dst, is_updated=None):
+    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated=None):
         ofmsgs = []
         if is_updated is not None:
             in_match = self.valve_in_match(
@@ -103,10 +104,6 @@ class ValveRouteManager(object):
                 self.logger.info(
                     'Updating next hop for route %s via %s (%s)',
                     ip_dst, ip_gw, eth_dst)
-                ofmsgs.extend(self.valve_flowdel(
-                    self.fib_table,
-                    in_match,
-                    priority=priority))
             else:
                 self.logger.info(
                     'Adding new route %s via %s (%s)',
@@ -117,31 +114,61 @@ class ValveRouteManager(object):
                 in_match,
                 priority=priority,
                 inst=[valve_of.apply_actions(
-                    [valve_of.set_eth_src(self.faucet_mac),
-                     valve_of.set_eth_dst(eth_dst),
-                     valve_of.dec_ip_ttl()])] +
-                [valve_of.goto_table(self.eth_dst_table)]))
-        now = time.time()
-        link_neighbor = LinkNeighbor(eth_dst, now)
-        neighbor_cache = self._neighbor_cache()
-        neighbor_cache[ip_gw] = link_neighbor
+                    [valve_of.group_act(group_id=
+                        self.ip_gw_to_group_id[ip_gw])])]))
+
         return ofmsgs
 
-    def _update_nexthop(self, vlan, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, vlan, in_port, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
         routes = self._routes()
         neighbor_cache = self._neighbor_cache()
+        group_cmd = None
+        group_id = None
         if resolved_ip_gw in neighbor_cache:
             cached_eth_dst = neighbor_cache[resolved_ip_gw].eth_src
             if cached_eth_dst != eth_src:
                 is_updated = True
+                # Modify the existing group in the group table
+                group_id = self.ip_gw_to_group_id[resolved_ip_gw]
+                group_cmd = valve_of.groupmod
         else:
             is_updated = False
-        for ip_dst, ip_gw in routes.iteritems():
-            if ip_gw == resolved_ip_gw:
-                ofmsgs.extend(self._add_resolved_route(
-                    ip_gw, ip_dst, eth_src, is_updated))
+
+            # Create a new group in group table
+            group_cmd = valve_of.groupadd
+            group_id = (hash(int(resolved_ip_gw))  & ((1<<32) -1)) +\
+                    valve_of.ROUTE_GROUP_OFFSET
+            self.ip_gw_to_group_id[resolved_ip_gw] = group_id
+
+        if is_updated is not None:
+            # Find port from vlan
+            port = None
+            for port in vlan.untagged + vlan.tagged:
+                if port.number == in_port:
+                    break
+            actions = []
+            actions.extend([
+                            valve_of.set_eth_src(self.faucet_mac),
+                            valve_of.set_eth_dst(eth_src),
+                            valve_of.dec_ip_ttl()])
+            if not vlan.port_is_tagged(port.number) and port.stack is None:
+                actions.append(valve_of.pop_vlan())
+            actions.append(valve_of.output_port(port.number))
+            buckets=[valve_of.bucket(actions=actions)]
+            ofmsgs.append(group_cmd(group_id=group_id, buckets=buckets))
+
+            # TODO: we need to keep track of what prefix already has fib entry,
+            # and just add the one that does not.
+            for ip_dst, ip_gw in routes.iteritems():
+                if ip_gw == resolved_ip_gw:
+                    ofmsgs.extend(self._add_resolved_route(
+                        vlan, ip_gw, ip_dst, eth_src, is_updated))
+
+        now = time.time()
+        link_neighbor = LinkNeighbor(eth_src, now)
+        neighbor_cache[resolved_ip_gw] = link_neighbor
 
         return ofmsgs
 
@@ -193,6 +220,7 @@ class ValveRouteManager(object):
                 ip_dst=ip_dst,
                 eth_dst=eth_dst,
                 is_updated=False))
+
         return ofmsgs
 
     def del_route(self, ip_dst):
@@ -213,6 +241,9 @@ class ValveRouteManager(object):
                 self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
             ofmsgs.extend(self.valve_flowdel(
                 self.fib_table, route_match))
+
+        # TODO: Delete the group that has no fib entry pointing to.
+
         return ofmsgs
 
     def control_plane_handler(self, in_port, vlan, eth_src, eth_dst, pkt):
@@ -289,7 +320,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
               vlan.ip_in_controller_subnet(src_ip) and
               vlan.ip_in_controller_subnet(dst_ip)):
             self.logger.info('ARP response %s for %s', eth_src, src_ip)
-            ofmsgs.extend(self._update_nexthop(vlan, eth_src, src_ip))
+            ofmsgs.extend(self._update_nexthop(vlan, in_port, eth_src, src_ip))
         return ofmsgs
 
     def control_plane_icmp_handler(self, in_port, vlan, eth_src,
@@ -401,7 +432,8 @@ class ValveIPv6RouteManager(ValveRouteManager):
               vlan.ip_in_controller_subnet(src_ip)):
             resolved_ip_gw = ipaddr.IPv6Address(icmpv6_pkt.data.dst)
             self.logger.info('ND response %s for %s', eth_src, resolved_ip_gw)
-            ofmsgs.extend(self._update_nexthop(vlan, eth_src, resolved_ip_gw))
+            ofmsgs.extend(self._update_nexthop(
+                vlan, in_port, eth_src, resolved_ip_gw))
         elif icmpv6_type == icmpv6.ICMPV6_ECHO_REQUEST:
             icmpv6_echo_reply = valve_packet.icmpv6_echo_reply(
                 self.faucet_mac, eth_src, vid,

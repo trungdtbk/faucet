@@ -23,8 +23,11 @@ class VLAN(Conf):
     untagged = None
     vid = None
     controller_ips = None
-    host_cache = None
     max_hosts = None
+    unicast_flood = None
+    # Define dynamic variables with prefix dyn_ to distinguish from variables set
+    # configuration
+    dyn_host_cache = None
 
     defaults = {
         'name': None,
@@ -33,7 +36,6 @@ class VLAN(Conf):
         'unicast_flood': True,
         'max_hosts': None,
         }
-
 
     def __init__(self, _id, dp_id, conf=None):
         if conf is None:
@@ -45,11 +47,19 @@ class VLAN(Conf):
         self._id = _id
         self.tagged = []
         self.untagged = []
-        self.host_cache = {}
+        self.dyn_host_cache = {}
 
         if self.controller_ips:
             self.controller_ips = [
                 ipaddr.IPNetwork(ip) for ip in self.controller_ips]
+
+    @property
+    def host_cache(self):
+        return self.dyn_host_cache
+
+    @host_cache.setter
+    def host_cache(self, value):
+        self.dyn_host_cache = value
 
     def set_defaults(self):
         for key, value in self.defaults.iteritems():
@@ -106,3 +116,13 @@ class VLAN(Conf):
             if ip in controller_ip:
                 return True
         return False
+
+    def __hash__(self):
+        items = [(k,v) for k,v in self.__dict__.iteritems() if 'dyn' not in k]
+        return hash(frozenset(map(str, items)))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)

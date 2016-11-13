@@ -403,6 +403,43 @@ dps:
             return [json.dumps(flow) for flow in flow_dump]
         return []
 
+    def get_group_id_for_matching_flow(self, exp_flow, timeout=10):
+        for _ in range(timeout):
+            flow_dump = self.get_all_flows_from_dpid(self.dpid, timeout)
+            for flow in flow_dump:
+                if re.search(exp_flow, flow):
+                    flow = json.loads(flow)
+                    group_id = int(re.findall(r'\d+', str(flow['actions']))[0])
+                    return group_id
+            time.sleep(1)
+        self.assertTrue(False,
+                "Can't find group_id for matching flow %s" % exp_flow)
+
+    def matching_in_group_table(self, exp_flow, group_id, timeout=5):
+        exp_group = '%s.+"group_id": %d' % (exp_flow, group_id)
+        for _ in range(timeout):
+            group_dump = self.get_all_groups_desc_from_dpid(self.dpid, 1)
+            for group_desc in group_dump:
+                if re.search(exp_group, group_desc):
+                    return True
+            time.sleep(1)
+        return False
+
+    def get_all_groups_desc_from_dpid(self, dpid, timeout=2):
+        int_dpid = str_int_dpid(dpid)
+        for _ in range(timeout):
+            try:
+                ofctl_result = json.loads(requests.get(
+                    '%s/stats/groupdesc/%s' % (self.ofctl_rest_url(),
+                                               int_dpid)).text)
+                flow_dump = ofctl_result[int_dpid]
+                return [json.dumps(flow) for flow in flow_dump]
+            except (ValueError, requests.exceptions.ConnectionError):
+                # Didn't get valid JSON, try again
+                time.sleep(1)
+                continue
+        return []
+
     def matching_flow_present_on_dpid(self, dpid, exp_flow, timeout=10):
         for _ in range(timeout):
             flow_dump = self.get_all_flows_from_dpid(dpid, timeout)
@@ -433,6 +470,11 @@ dps:
             self.require_host_learned(host)
         self.assertEquals(0, self.net.pingAll())
 
+    def wait_until_matching_in_group_table(self, exp_flow, group_id, timeout):
+        self.assertTrue(
+                self.matching_in_group_table(exp_flow, group_id, timeout),
+                'Group matching %s in group %d not found' % (exp_flow, group_id))
+
     def wait_until_matching_route_as_flow(self, nexthop, prefix, timeout=5):
         if prefix.version == 6:
             exp_prefix = '/'.join(
@@ -441,8 +483,9 @@ dps:
         else:
             exp_prefix = prefix.masked().with_netmask
             nw_dst_match = '"nw_dst": "%s"' % exp_prefix
-        self.wait_until_matching_flow(
-            'SET_FIELD: {eth_dst:%s}.+%s' % (nexthop, nw_dst_match), timeout)
+        group_id = self.get_group_id_for_matching_flow(nw_dst_match, timeout)
+        self.wait_until_matching_in_group_table(
+                '"SET_FIELD: {eth_dst:%s}"' % nexthop, group_id, timeout)
 
     def curl_portmod(self, int_dpid, port_no, config, mask):
         # TODO: avoid dependency on varying 'requests' library.
@@ -769,6 +812,107 @@ class FaucetUntaggedHUPTest(FaucetUntaggedTest):
             self.ping_all_when_learned()
 
 
+class FaucetUntaggedHUPConfigChangeTest(FaucetUntaggedTest):
+
+    CONFIG_GLOBAL = """
+vlans:
+    100:
+        description: "untagged"
+acls:
+    1:
+        - rule:
+            dl_type: 0x800
+            nw_proto: 6
+            tp_dst: 53
+            actions:
+                allow: 0
+        - rule:
+            actions:
+                allow: 1
+"""
+    CONFIG = """
+        interfaces:
+            %(port_1)d:
+                native_vlan: 100
+                description: "b1"
+                acl_in: 1
+            %(port_2)d:
+                native_vlan: 100
+                description: "b2"
+            %(port_3)d:
+                native_vlan: 100
+                description: "b3"
+            %(port_4)d:
+                native_vlan: 100
+                description: "b4"
+"""
+
+    def get_flow(self, exp_flow, timeout=10):
+        for _ in range(timeout):
+            flow_dump = self.get_all_flows_from_dpid(self.dpid)
+            for flow in flow_dump:
+                if re.search(exp_flow, flow):
+                    return json.loads(flow)
+            time.sleep(1)
+        return {}
+
+    def ntest_change_port_vlan(self):
+        self.ping_all_when_learned()
+        conf = yaml.load(self.CONFIG)
+        vid = 100
+        for _ in range(1, 2):
+            time.sleep(2)
+            flow_p1 = self.get_flow(
+                    '"table_id": 0, "match": {"dl_vlan": "0x0000", "in_port": 1}')
+            flow_p3 = self.get_flow(
+                    '"table_id": 0, "match": {"dl_vlan": "0x0000", "in_port": 3}')
+            prev_dur_p1 = flow_p1['duration_sec']
+            prev_dur_p3 = flow_p3['duration_sec']
+            if vid == 200:
+                vid = 100
+                ping_test = self.ping_all_when_learned
+            else:
+                vid = 200
+                ping_test = self.ping_cross_vlans
+            conf['dps']['faucet-1']['interfaces'][1]['native_vlan'] = vid
+            conf['dps']['faucet-1']['interfaces'][2]['native_vlan'] = vid
+            open(os.environ['FAUCET_CONFIG'], 'w').write(yaml.dump(conf))
+            self.hup_faucet()
+            flow_p1 = self.get_flow(
+                    '"table_id": 0, "match": {"dl_vlan": "0x0000", "in_port": 1}')
+            flow_p3 = self.get_flow(
+                    '"table_id": 0, "match": {"dl_vlan": "0x0000", "in_port": 3}')
+            actions = flow_p1.get('actions', '')
+            actions = [act for act in actions if 'vlan_vid' in act]
+            vid_ = re.findall(r'\d+', str(actions))
+            self.assertEqual(vid+4096, int(vid_[0]))
+            dur_p1 = flow_p1['duration_sec']
+            dur_p3 = flow_p3['duration_sec']
+            self.assertGreater(prev_dur_p1, dur_p1)
+            self.assertLess(prev_dur_p3, dur_p3)
+            ping_test()
+
+    def test_change_port_acl(self):
+        self.ping_all_when_learned()
+        conf = yaml.load(self.CONFIG)
+        for i in range(1, 2):
+            time.sleep(2)
+            conf['acls'][1].insert(0,
+                    {'rule': {'dl_type': 0x800,
+                              'nw_proto': 17,
+                              'tp_dst': 8000+i,
+                              'actions': {'allow': 1}}})
+            open(os.environ['FAUCET_CONFIG'], 'w').write(yaml.dump(conf))
+            self.hup_faucet()
+            self.wait_until_matching_flow(
+                    '{"dl_type": 2048, "nw_proto": 17, "in_port": 1, "tp_dst": %d}' % \
+                            (8000+i))
+
+    def ping_cross_vlans(self):
+        self.assertEqual(0, self.net.ping((self.net.hosts[0], self.net.hosts[1])))
+        self.assertEqual(0, self.net.ping((self.net.hosts[2], self.net.hosts[3])))
+        self.assertEqual(100, self.net.ping((self.net.hosts[0], self.net.hosts[3])))
+
 class FaucetSingleUntaggedBGPIPv4RouteTest(FaucetUntaggedTest):
 
     CONFIG_GLOBAL = """
@@ -936,12 +1080,9 @@ vlans:
     def test_untagged(self):
         self.assertTrue(self.bogus_mac_flooded_to_port1())
         # Unicast flooding rule for from port 1
-        self.assertTrue(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # Unicast flood rule exists that output to port 1
-        self.assertTrue(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+        flow_match = '"table_id": 6, "match": {"dl_vlan": "100"}'
+        group_id = self.get_group_id_for_matching_flow(flow_match)
+        self.assertTrue(self.matching_in_group_table('"OUTPUT:1"', group_id))
 
 class FaucetUntaggedNoVLanUnicastFloodTest(FaucetUntaggedTest):
 
@@ -972,10 +1113,7 @@ vlans:
         self.assertFalse(self.bogus_mac_flooded_to_port1())
         # No unicast flooding rule for from port 1
         self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # No unicast flood rule exists that output to port 1
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
+            '"table_id": 6, "match": {"dl_vlan": "100"}'))
 
 
 class FaucetUntaggedPortUnicastFloodTest(FaucetUntaggedTest):
@@ -1008,13 +1146,8 @@ vlans:
         # VLAN level config to disable flooding takes precedence,
         # cannot enable port-only flooding.
         self.assertFalse(self.bogus_mac_flooded_to_port1())
-        # No unicast flooding rule for from port 1
         self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
-        # No unicast flood rule exists that output to port 1
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+            '"table_id": 6, "match": {"dl_vlan": "100"}'))
 
 class FaucetUntaggedNoPortUnicastFloodTest(FaucetUntaggedTest):
 
@@ -1044,17 +1177,10 @@ vlans:
 
     def test_untagged(self):
         self.assertFalse(self.bogus_mac_flooded_to_port1())
-        # Unicast flood rule present for port 2, but NOT for port 1
-        self.assertTrue(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 2}'))
-        self.assertFalse(self.matching_flow_present(
-            '"table_id": 6, "match": {"dl_vlan": "100", "in_port": 1}'))
         # Unicast flood rules present that output to port 2, but NOT to port 1
-        self.assertTrue(self.matching_flow_present(
-            '"OUTPUT:2".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-        self.assertFalse(self.matching_flow_present(
-            '"OUTPUT:1".+"table_id": 6, "match": {"dl_vlan": "100", "in_port": .}'))
-
+        flow_match = '"table_id": 6, "match": {"dl_vlan": "100"}'
+        group_id = self.get_group_id_for_matching_flow(flow_match)
+        self.assertFalse(self.matching_in_group_table('"OUTPUT:1"', group_id))
 
 class FaucetUntaggedHostMoveTest(FaucetUntaggedTest):
 
@@ -1859,7 +1985,6 @@ class FaucetStringOfDPTest(FaucetTest):
             acls,
             acl_in_dp,
         )
-
         open(os.environ['FAUCET_CONFIG'], 'w').write(self.CONFIG)
 
     def get_config(self, dpids=[], stack=False, hardware=None, ofchannel_log=None,
