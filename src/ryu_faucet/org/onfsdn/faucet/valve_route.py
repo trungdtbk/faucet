@@ -194,7 +194,6 @@ class ValveRouteManager(object):
                             valve_of.dec_ip_ttl()])]
                 inst.append(valve_of.goto_table(self.eth_dst_table))
             else:
-                priority += 1
                 inst = [
                     valve_of.apply_actions([
                         valve_of.pop_vlan(),
@@ -203,7 +202,8 @@ class ValveRouteManager(object):
                         valve_of.dec_ip_ttl()] +
                         valve_of.push_mpls_act(pid))]
                 inst.append(valve_of.goto_table(self.tunnel_table))
-
+            if pid is not None:
+                priority += 1
             in_match = self.valve_in_match(
                 self.fib_table, eth_type=self._eth_type(),
                 vlan=vlan, nw_dst=ip_dst,
