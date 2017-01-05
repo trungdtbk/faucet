@@ -208,8 +208,8 @@ def build_match_dict(in_port=None, vlan=None,
                      eth_type=None, eth_src=None,
                      eth_dst=None, eth_dst_mask=None,
                      ipv6_nd_target=None, icmpv6_type=None,
-                     nw_proto=None,
-                     nw_src=None, nw_dst=None):
+                     nw_proto=None, nw_src=None, nw_dst=None,
+                     mpls_label=None, metadata=None, metadata_mask=None):
     match_dict = {}
     if in_port is not None:
         match_dict['in_port'] = in_port
@@ -243,6 +243,13 @@ def build_match_dict(in_port=None, vlan=None,
             match_dict['ipv6_dst'] = nw_dst_masked
     if eth_type is not None:
         match_dict['eth_type'] = eth_type
+    if mpls_label is not None:
+        match_dict['mpls_label'] = mpls_label
+    if metadata is not None:
+        if metadata_mask is not None:
+            match_dict['metadata'] = (metadata, metadata_mask)
+        else:
+            match_dict['metadata'] = (metadata, (1<<64)-1)
     return match_dict
 
 
@@ -294,3 +301,21 @@ def groupdel(datapath=None, group_id=ofp.OFPG_ALL):
             ofp.OFPGC_DELETE,
             0,
             group_id)
+
+def write_metadata(metadata, mask=(1<<64)-1):
+    """Return instruction that add metadata to packets
+    Args:
+        metadata (int): 64bit
+        mask (int): 64bit
+    Returns:
+        ryu.ofproto.ofproto_v1_3_parser.OFPInstructionWriteMedatada
+    """
+    return parser.OFPInstructionWriteMetadata(metadata, mask)
+
+def push_mpls_act(mpls_label):
+    return [
+            parser.OFPActionPushMpls(),
+            parser.OFPActionSetField(mpls_label=mpls_label)]
+
+def pop_mpls_act():
+    return parser.OFPActionPopMpls()

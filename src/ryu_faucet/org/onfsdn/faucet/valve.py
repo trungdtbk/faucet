@@ -78,17 +78,9 @@ class Valve(object):
         # TODO: functional flow managers require too much state.
         # Should interface with a common composer class.
         self.ipv4_route_manager = valve_route.ValveIPv4RouteManager(
-            self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
-            self.dp.ipv4_fib_table, self.dp.eth_src_table, self.dp.eth_dst_table,
-            self.dp.highest_priority,
-            self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
-            self.valve_flowcontroller)
+                self.logger, self)
         self.ipv6_route_manager = valve_route.ValveIPv6RouteManager(
-            self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
-            self.dp.ipv6_fib_table, self.dp.eth_src_table, self.dp.eth_dst_table,
-            self.dp.highest_priority,
-            self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
-            self.valve_flowcontroller)
+                self.logger, self)
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.flood_table, self.dp.low_priority,
             self.valve_in_match, self.valve_flowmod,
@@ -109,19 +101,22 @@ class Valve(object):
             # be split further into two tables for IPv4/IPv6 entries.
             self.dp.eth_src_table: (
                 'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type',
-                'ip_proto',
+                'ip_proto', 'mpls_label',
                 'icmpv6_type', 'ipv6_nd_target',
-                'arp_tpa', 'ipv4_src'),
+                'arp_tpa', 'ipv4_src', 'metadata'),
             self.dp.ipv4_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'ipv4_src', 'ipv4_dst'),
+                'ipv4_src', 'ipv4_dst', 'metadata'),
             self.dp.ipv6_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'icmpv6_type', 'ipv6_dst'),
+                'icmpv6_type', 'ipv6_dst', 'metadata'),
             self.dp.eth_dst_table: (
                 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
                 'in_port', 'vlan_vid', 'eth_dst'),
+            self.dp.tunnel_table: (
+                'eth_dst', 'eth_type', 'ip_proto', 'vlan_vid',
+                'ipv4_src', 'ipv4_dst', 'metadata'),
         }
 
     def _in_port_tables(self):
@@ -157,11 +152,13 @@ class Valve(object):
                        eth_type=None, eth_src=None,
                        eth_dst=None, eth_dst_mask=None,
                        ipv6_nd_target=None, icmpv6_type=None,
-                       nw_proto=None, nw_src=None, nw_dst=None):
+                       nw_proto=None, nw_src=None, nw_dst=None,
+                       mpls_label=None,
+                       metadata=None, metadata_mask=None):
         match_dict = valve_of.build_match_dict(
             in_port, vlan, eth_type, eth_src,
             eth_dst, eth_dst_mask, ipv6_nd_target, icmpv6_type,
-            nw_proto, nw_src, nw_dst)
+            nw_proto, nw_src, nw_dst, mpls_label, metadata, metadata_mask)
         if table_id != self.dp.acl_table:
             assert table_id in self.TABLE_MATCH_TYPES,\
                 '%u table not registered' % table_id
@@ -198,7 +195,8 @@ class Valve(object):
             self.dp.ipv4_fib_table,
             self.dp.ipv6_fib_table,
             self.dp.eth_dst_table,
-            self.dp.flood_table)
+            self.dp.flood_table,
+            self.dp.tunnel_table)
 
     def valve_flowmod(self, table_id, match=None, priority=None,
                       inst=None, command=ofp.OFPFC_ADD, out_port=0,
@@ -290,6 +288,15 @@ class Valve(object):
                 self.dp.vlan_table, eth_src=self.FAUCET_MAC),
             priority=self.dp.high_priority))
 
+        # drop packet to faucet mac range
+        """
+        ofmsgs.append(self.valve_flowdrop(
+            self.dp.eth_src_table,
+            self.valve_in_match(
+                self.dp.vlan_table, eth_src=self.FAUCET_MAC,
+                eth_dst_mask=(1<<47)),
+            priority=self.dp.high_priority))
+        """
         # drop STDP BPDU
         for bpdu_mac in ('01:80:C2:00:00:00', '01:00:0C:CC:CC:CD'):
             ofmsgs.append(self.valve_flowdrop(
@@ -821,17 +828,39 @@ class Valve(object):
                     vlan, controller_ip, controller_ip_host))
         return ofmsgs
 
-    def add_route(self, ip_gw, ip_dst):
+    def add_route(self, ip_gw, ip_dst, vip=None, pid=None, local=True):
+        """
+        Args:
+            ip_dst (ipaddr.IPNetwork): destination prefix
+            ip_gw (ipaddr.IPAddress): nexthop
+            pid (ipaddr.IPAddress): path identifier
+        """
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.add_route(ip_gw, ip_dst)
+            return self.ipv6_route_manager.add_route(
+                    ip_gw=ip_gw,
+                    ip_dst=ip_dst,
+                    vip=vip, pid=pid, local=local)
         else:
-            return self.ipv4_route_manager.add_route(ip_gw, ip_dst)
+            return self.ipv4_route_manager.add_route(
+                    ip_gw=ip_gw,
+                    ip_dst=ip_dst,
+                    vip=vip, pid=pid, local=local)
 
-    def del_route(self, ip_dst):
+    def del_route(self, ip_dst, ip_gw):
+        """
+        Args:
+            ip_dst (ipaddr.IPNetwork): destination prefix
+            ip_gw (ipaddr.IPAddress): nexthop
+            pid (ipaddr.IPAddress): path identifier
+        """
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.del_route(ip_dst)
+            return self.ipv6_route_manager.del_route(
+                    ip_dst=ip_dst,
+                    ip_gw=ip_gw)
         else:
-            return self.ipv4_route_manager.del_route(ip_dst)
+            return self.ipv4_route_manager.del_route(
+                    ip_dst=ip_dst,
+                    ip_gw=ip_gw)
 
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.

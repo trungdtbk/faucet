@@ -38,6 +38,7 @@ class DP(Conf):
     eth_src_table = None
     ipv4_fib_table = None
     ipv6_fib_table = None
+    tunnel_table = None
     eth_dst_table = None
     flood_table = None
     priority_offset = None
@@ -59,6 +60,7 @@ class DP(Conf):
         'eth_src_table': None,
         'ipv4_fib_table': None,
         'ipv6_fib_table': None,
+        'tunnel_table': None,
         'eth_dst_table': None,
         'flood_table': None,
         # How much to offset default priority by
@@ -125,6 +127,7 @@ class DP(Conf):
         self._set_default('ipv6_fib_table', self.ipv4_fib_table + 1)
         self._set_default('eth_dst_table', self.ipv6_fib_table + 1)
         self._set_default('flood_table', self.eth_dst_table + 1)
+        self._set_default('tunnel_table', self.flood_table + 1)
         self._set_default('lowest_priority', self.priority_offset)
         self._set_default('low_priority', self.priority_offset + 9000)
         self._set_default('high_priority', self.low_priority + 1)

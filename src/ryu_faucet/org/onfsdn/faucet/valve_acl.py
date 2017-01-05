@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ipaddr
 import valve_of
 
 class ACL(object):
@@ -39,6 +40,7 @@ def build_acl_entry(rule_conf, acl_allow_inst, port_num):
         if attrib == 'in_port':
             continue
         if attrib == 'actions':
+            metadata = None
             allow = False
             allow_specified = False
             if 'allow' in attrib_value:

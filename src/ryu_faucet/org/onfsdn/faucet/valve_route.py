@@ -40,63 +40,42 @@ class RouteTable(object):
     """
     def __init__(self):
         self._routes = {}
-        self._default_routes = {}
+        self.max_paths = 16
 
-    def add_route(self, ip_dst, ip_gw, default=True):
+    def add_route(self, ip_dst, ip_gw):
         """Add a new or update an existing route
         Return the route object
         """
         nexthop_set = self._routes.get(ip_dst, set())
+        if ip_gw in nexthop_set:
+            return False
         nexthop_set.add(ip_gw)
         self._routes[ip_dst] = nexthop_set
-        if default:
-            self._default_routes[ip_dst] = ip_gw
+        return True
 
     def del_route(self, ip_dst, ip_gw=None):
         """Delete a route object from the table
-        Return the deleted route
+        Returns:
+            None
         """
 
         if ip_gw == None:
-            self._routes.pop(ip_dst, None)
-            return self._default_routes.pop(ip_dst, None) is not None
+            self._routes.pop(ip_dst, set())
         else:
             nexthop_set = self._routes.get(ip_dst, set())
-            if ip_gw in nexthop_set:
-                nexthop_set.remove(ip_gw)
-                self._routes[ip_gw] = nexthop_set
-
-                if ip_gw == self._default_routes.get(ip_dst):
-                    self._default_routes.pop(ip_dst, None)
-                return True
-
-        return False
+            nexthop_set.discard(ip_gw)
+            self._routes[ip_gw] = nexthop_set
 
     def get_nexthops(self, ip_dst):
         """Get a route object belonging to ip_dst
         """
         return self._routes.get(ip_dst, set())
 
-    def get_default_nexthop(self, ip_dst):
-        return self._default_routes.get(ip_dst, None)
-
-    def del_nexthop(self, ip_dst, ip_gw):
-        """Delete a nexthop belong to a route
-        """
-        nexthop_set = self._routes.get(ip_dst, set())
-        nexthop_set.discard(ip_gw)
-        self._routes[ip_dst] = nexthop_set
-        if ip_gw == self._default_routes.get(ip_dst, None):
-            self._default_routes.pop(ip_dst, None)
-
-    def get_default_routes(self):
-        return self._default_routes
-
     def get_routes(self):
         return self._routes
 
     def get_all_gw(self):
-        """Return all nexthops
+        """Return all ip gateway
         """
         nexthops = set()
         for nexthop_set in self._routes.itervalues():
@@ -107,28 +86,57 @@ class RouteTable(object):
 class ValveRouteManager(object):
     """Base class to implement RIB/FIB."""
 
-    def __init__(self, logger, faucet_mac, arp_neighbor_timeout,
-                 fib_table, eth_src_table, eth_dst_table, route_priority,
-                 valve_in_match, valve_flowdel, valve_flowmod,
-                 valve_flowcontroller):
+    def __init__(self, logger, valve):
         self.logger = logger
-        self.faucet_mac = faucet_mac
-        self.arp_neighbor_timeout = arp_neighbor_timeout
-        self.fib_table = fib_table
-        self.eth_src_table = eth_src_table
-        self.eth_dst_table = eth_dst_table
-        self.route_priority = route_priority
-        self.valve_in_match = valve_in_match
-        self.valve_flowdel = valve_flowdel
-        self.valve_flowmod = valve_flowmod
-        self.valve_flowcontroller = valve_flowcontroller
+        self.valve = valve
+
+        self.faucet_mac = self.valve.FAUCET_MAC
+        self.arp_neighbor_timeout = self.valve.dp.arp_neighbor_timeout
+        self.eth_src_table = self.valve.dp.eth_src_table
+        self.eth_dst_table = self.valve.dp.eth_dst_table
+        self.route_priority = self.valve.dp.highest_priority
+        self.valve_in_match = self.valve.valve_in_match
+        self.valve_flowdel = self.valve.valve_flowdel
+        self.valve_flowmod = self.valve.valve_flowmod
+        self.valve_flowcontroller = self.valve.valve_flowcontroller
 
         self.arp_cache = {}
         self.nd_cache = {}
         # Map ip_gw with group id
         self.ip_gw_to_group_id = {}
+        self.ip_gw_to_metadata = {}
+        self.pid_to_vmac = {}
+        self.ip_gw_to_tunnel = {} # IP nexthop to tunnel ID
+        self.path_table = {} #Mapping between PID & (ip_dst, ip_gw)
+        self.local_paths = set()
+        self.tunnel_table = self.valve.dp.tunnel_table
 
+        # Testing
+        #self.ip_gw_to_tunnel[ipaddr.IPAddress("10.0.0.5")] = 100
         self.routes = RouteTable()
+
+        self.max_paths = 16 # Maximum number of forwardingpaths per prefixes
+        self.metadata_table = {}
+
+    def _get_metadata(self, pid):
+        """
+        Return metatada for path identifier
+        """
+        return int(pid)
+
+    def _get_vmac(self, ip=None):
+        """Compute virtual MAC from IPAddress
+        """
+        if ip in self.pid_to_vmac:
+            return self.pid_to_vmac[ip]
+        elif ip is None:
+            return self.faucet_mac
+
+        ip = ipaddr.IPAddress(hash(int(ip)) & ((1<<32) -1))
+        mac = '0E:00:' + '{:02X}:{:02X}:{:02X}:{:02X}'.format(
+                *map(int, str(ip).split('.')))
+        self.pid_to_vmac[ip] = mac
+        return mac
 
     def _vlan_vid(self, vlan, in_port):
         vid = None
@@ -162,13 +170,10 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, ip_gw, ip_dst, eth_dst, is_updated=None):
+    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst,
+                                  is_updated=None):
         ofmsgs = []
         if is_updated is not None:
-            in_match = self.valve_in_match(
-                self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
-            prefixlen = ipaddr.IPNetwork(ip_dst).prefixlen
-            priority = self.route_priority + prefixlen
             if is_updated:
                 self.logger.info(
                     'Updating next hop for route %s via %s (%s)',
@@ -178,20 +183,42 @@ class ValveRouteManager(object):
                     'Adding new route %s via %s (%s)',
                     ip_dst, ip_gw, eth_dst)
 
+            prefixlen = ipaddr.IPNetwork(ip_dst).prefixlen
+            priority = self.route_priority + prefixlen
+            pid = self.path_table[(ip_dst, ip_gw)]
+            if ip_gw in self.local_paths or pid is None:
+                inst = [
+                        valve_of.apply_actions([
+                            valve_of.set_eth_src(self.faucet_mac),
+                            valve_of.set_eth_dst(eth_dst),
+                            valve_of.dec_ip_ttl()])]
+                inst.append(valve_of.goto_table(self.eth_dst_table))
+            else:
+                priority += 1
+                inst = [
+                    valve_of.apply_actions([
+                        valve_of.pop_vlan(),
+                        valve_of.set_eth_src(self.faucet_mac),
+                        valve_of.set_eth_dst(eth_dst),
+                        valve_of.dec_ip_ttl()] +
+                        valve_of.push_mpls_act(pid))]
+                inst.append(valve_of.goto_table(self.tunnel_table))
+
+            in_match = self.valve_in_match(
+                self.fib_table, eth_type=self._eth_type(),
+                vlan=vlan, nw_dst=ip_dst,
+                metadata=pid)
             ofmsgs.append(self.valve_flowmod(
                 self.fib_table,
                 in_match,
                 priority=priority,
-                inst=[valve_of.apply_actions(
-                    [valve_of.group_act(group_id=
-                        self.ip_gw_to_group_id[ip_gw])])]))
+                inst=inst))
 
         return ofmsgs
 
     def _update_nexthop(self, vlan, in_port, eth_src, resolved_ip_gw):
         ofmsgs = []
         is_updated = None
-        routes = self.routes.get_default_routes()
         neighbor_cache = self._neighbor_cache()
         group_cmd = None
         group_id = None
@@ -204,7 +231,6 @@ class ValveRouteManager(object):
                 group_cmd = valve_of.groupmod
         else:
             is_updated = False
-
             # Create a new group in group table
             group_cmd = valve_of.groupadd
             group_id = (hash(int(resolved_ip_gw))  & ((1<<32) -1)) +\
@@ -218,22 +244,29 @@ class ValveRouteManager(object):
                 if port.number == in_port:
                     break
             actions = []
-            actions.extend([
-                            valve_of.set_eth_src(self.faucet_mac),
-                            valve_of.set_eth_dst(eth_src),
-                            valve_of.dec_ip_ttl()])
-            if not vlan.port_is_tagged(port.number) and port.stack is None:
-                actions.append(valve_of.pop_vlan())
             actions.append(valve_of.output_port(port.number))
             buckets=[valve_of.bucket(actions=actions)]
             ofmsgs.append(group_cmd(group_id=group_id, buckets=buckets))
 
-            # TODO: we need to keep track of what prefix already has fib entry,
-            # and just add the one that does not.
-            for ip_dst, ip_gw in routes.iteritems():
-                if ip_gw == resolved_ip_gw:
-                    ofmsgs.extend(self._add_resolved_route(
-                        ip_gw, ip_dst, eth_src, is_updated))
+            if resolved_ip_gw not in self.local_paths:
+                actions = []
+                if resolved_ip_gw in self.ip_gw_to_tunnel:
+                    actions.extend(valve_of.push_mpls_act(
+                            self.ip_gw_to_tunnel[resolved_ip_gw]))
+                actions.append(valve_of.output_port(in_port))
+                inst = [valve_of.apply_actions(actions)]
+                ofmsgs.append(self.valve_flowmod(
+                    self.tunnel_table,
+                    match=self.valve_in_match(
+                        self.tunnel_table,
+                        eth_dst=eth_src),
+                    priority=self.route_priority,
+                    inst=inst))
+            all_routes = self.routes.get_routes()
+            for ip_dst, gw_set in all_routes.iteritems():
+                if resolved_ip_gw in gw_set:
+                    ofmsgs.extend(self._add_resolved_route(vlan,
+                        resolved_ip_gw, ip_dst, eth_src, is_updated))
 
         now = time.time()
         link_neighbor = LinkNeighbor(eth_src, now)
@@ -268,51 +301,130 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, ip_gw, ip_dst, default=True):
+    def add_route(self, ip_gw, ip_dst, vip=None, pid=None, local=True):
         """Add a route to the RIB.
 
         Args:
             ip_gw (ipaddr.IPAddress): IP address of nexthop.
             ip_dst (ipaddr.IPNetwork): destination IP network.
+            vip (ipaddr.IPAddress): virtual ip of Valve as nexthop to hosts
+            pid (int): path identifier
         Returns:
             list: OpenFlow messages.
         """
         ofmsgs = []
-        self.routes.add_route(ip_gw=ip_gw, ip_dst=ip_dst, default=default)
+        vmac = None
+        if vip in self.pid_to_vmac:
+            vmac = self.pid_to_vmac[vip]
+        elif vip is not None:
+            ip = ipaddr.IPAddress(hash(int(vip)) & ((1<<32) -1))
+            vmac = '0E:00:' + '{:02X}:{:02X}:{:02X}:{:02X}'.format(
+                    *map(int, str(ip).split('.')))
+        else:
+            vmac = self.faucet_mac
+
+        vlan = None
+        for vlan in self.valve.dp.vlans.values():
+            for controller_ip in vlan.controller_ips:
+                if ip_gw in controller_ip:
+                    if vip is None:
+                        self.local_paths.add(ip_gw)
+                        vip = controller_ip.ip
+                        pid = None
+                    break
+        if vlan is None:
+            self.logger.info("add route %s via %s failed", ip_dst, ip_gw)
+            return ofmsgs
+        if local:
+            self.local_paths.add(ip_gw)
+
+        if vip not in self.pid_to_vmac:
+            # Add a controller rule to this VMAC
+            ofmsgs.append(self.valve_flowcontroller(
+                self.eth_src_table,
+                self.valve_in_match(
+                    self.eth_src_table,
+                    eth_type=ether.ETH_TYPE_ARP,
+                    nw_dst=ipaddr.IPNetwork(vip)),
+                    priority=self.route_priority + vip.max_prefixlen))
+            if pid is not None:
+                ofmsgs.append(self.valve_flowmod(
+                    self.eth_src_table,
+                    match=self.valve_in_match(
+                        self.eth_src_table,
+                        eth_type=self._eth_type(),
+                        eth_dst=vmac),
+                    priority=self.route_priority + 1,
+                    inst=[
+                        valve_of.write_metadata(pid),
+                        valve_of.goto_table(self.fib_table)]))
+        self.pid_to_vmac[vip] = vmac
+        self.routes.add_route(ip_gw=ip_gw, ip_dst=ip_dst)
+        old_pid = self.path_table.get((ip_dst, ip_gw), None)
+        if old_pid is not None and old_pid != pid:
+            ofmsgs.extend(self.del_route(
+                ip_dst=ip_dst,
+                ip_gw=ip_gw))
+        self.path_table[(ip_dst, ip_gw)] = pid
+        if local and pid is not None:
+            ofmsgs.append(self.valve_flowmod(
+                self.eth_src_table,
+                match=self.valve_in_match(
+                    self.eth_src_table,
+                    eth_type=ether.ETH_TYPE_MPLS,
+                    mpls_label=pid,
+                    eth_dst=self.faucet_mac),
+                priority=self.route_priority + 1,
+                inst=[
+                    valve_of.apply_actions(
+                        [valve_of.pop_mpls_act()]),
+                    valve_of.write_metadata(pid),
+                    valve_of.goto_table(self.fib_table)]))
+
         neighbor_cache = self._neighbor_cache()
         if ip_gw in neighbor_cache:
-            if default:
-                eth_dst = neighbor_cache[ip_gw].eth_src
-                ofmsgs.extend(self._add_resolved_route(
-                    ip_gw=ip_gw,
-                    ip_dst=ip_dst,
-                    eth_dst=eth_dst,
-                    is_updated=False))
-            else:
-                # TODO: Handle multipath forwarding
-                pass
+            eth_dst = neighbor_cache[ip_gw].eth_src
+            ofmsgs.extend(self._add_resolved_route(
+                vlan=vlan,
+                ip_gw=ip_gw,
+                ip_dst=ip_dst,
+                eth_dst=eth_dst,
+                is_updated=False))
+
+        self.logger.info("add route %s via %s (pid: %s)", ip_dst, ip_gw, pid)
 
         return ofmsgs
 
-    def del_route(self, ip_dst, ip_gw=None):
+    def del_route(self, ip_dst, ip_gw):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
 
         Args:
             ip_dst (ipaddr.IPNetwork): destination IP network.
+            ip_gw (ipaddr.IPAddress): if None, delete all routes to ip_dst
         Returns:
             list: OpenFlow messages.
         """
         ofmsgs = []
-        if self.routes.del_route(ip_dst, ip_gw):
-            route_match = self.valve_in_match(
-                self.fib_table, eth_type=self._eth_type(), nw_dst=ip_dst)
-            ofmsgs.extend(self.valve_flowdel(
-                self.fib_table, route_match))
-        else:
-            #TODO: handle multipath forwarding
-            pass
+        self.routes.del_route(ip_dst, ip_gw)
+        self.local_paths.discard(ip_gw)
+        pid = self.path_table.pop((ip_dst, ip_gw), None)
+        """
+        ofmsgs.append(
+                self.valve_flowdel(
+                    self.eth_src_table,
+                    match=self.valve_in_match(
+                        self.eth_src_table,
+                        eth_type=self._eth_type(),
+                        eth_dst=
+        """
+        match = self.valve_in_match(
+                self.fib_table,
+                eth_type=self._eth_type(),
+                nw_dst=ip_dst,
+                metadata=pid)
+        ofmsgs.extend(self.valve_flowdel(self.fib_table, match))
 
         return ofmsgs
 
@@ -322,6 +434,11 @@ class ValveRouteManager(object):
 
 class ValveIPv4RouteManager(ValveRouteManager):
     """Implement IPv4 RIB/FIB."""
+
+    def __init__(self, logger, valve):
+        super(ValveIPv4RouteManager, self).__init__(logger, valve)
+
+        self.fib_table = self.valve.dp.ipv4_fib_table
 
     def _eth_type(self):
         return ether.ETH_TYPE_IP
@@ -351,10 +468,10 @@ class ValveIPv4RouteManager(ValveRouteManager):
             self.valve_in_match(
                 self.eth_src_table,
                 eth_type=self._eth_type(),
-                eth_dst=self.faucet_mac,
-                vlan=vlan),
-            priority=self.route_priority,
-            inst=[valve_of.goto_table(self.fib_table)]))
+                eth_dst=self.faucet_mac),
+            priority=self.route_priority + 1,
+            inst=[
+                valve_of.goto_table(self.fib_table)]))
         ofmsgs.append(self.valve_flowcontroller(
             self.fib_table,
             self.valve_in_match(
@@ -372,13 +489,13 @@ class ValveIPv4RouteManager(ValveRouteManager):
         opcode = arp_pkt.opcode
         src_ip = ipaddr.IPv4Address(arp_pkt.src_ip)
         dst_ip = ipaddr.IPv4Address(arp_pkt.dst_ip)
-
         if (opcode == arp.ARP_REQUEST and
                 vlan.ip_in_controller_subnet(src_ip) and
                 vlan.ip_in_controller_subnet(dst_ip)):
             vid = self._vlan_vid(vlan, in_port)
             arp_reply = valve_packet.arp_reply(
-                self.faucet_mac, eth_src, vid, dst_ip, src_ip)
+                self.pid_to_vmac.get(dst_ip, self.faucet_mac),
+                eth_src, vid, dst_ip, src_ip)
             ofmsgs.append(valve_of.packetout(in_port, arp_reply.data))
             self.logger.info(
                 'Responded to ARP request for %s from %s', src_ip, dst_ip)
@@ -422,6 +539,11 @@ class ValveIPv4RouteManager(ValveRouteManager):
 
 class ValveIPv6RouteManager(ValveRouteManager):
     """Implement IPv6 FIB."""
+
+    def __init__(self, logger, valve):
+        super(ValveIPv6RouteManager, self).__init__(logger, valve)
+
+        self.fib_table = self.valve.dp.ipv6_fib_table
 
     def _eth_type(self):
         return ether.ETH_TYPE_IPV6

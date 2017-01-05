@@ -41,6 +41,8 @@ from ryu.lib.packet import vlan as ryu_vlan
 from ryu.ofproto import ofproto_v1_3, ether
 from ryu.services.protocols.bgp.bgpspeaker import BGPSpeaker
 
+from rest import FaucetRest
+from ryu.app.wsgi import WSGIApplication
 
 class EventFaucetReconfigure(event.EventBase):
     """Event used to trigger FAUCET reconfiguration."""
@@ -65,7 +67,7 @@ class Faucet(app_manager.RyuApp):
     """
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
-    _CONTEXTS = {'dpset': dpset.DPSet}
+    _CONTEXTS = {'dpset': dpset.DPSet, 'wsgi': WSGIApplication}
 
     logname = 'faucet'
     exc_logname = logname + '.exception'
@@ -97,7 +99,7 @@ class Faucet(app_manager.RyuApp):
             self.logname, self.logfile, logging.DEBUG, 0)
         # Set up separate logging for exceptions
         self.exc_logger = get_logger(
-            self.exc_logname, self.exc_logfile, logging.CRITICAL, 1)
+            self.exc_logname, self.exc_logfile, logging.DEBUG, 1)
 
         # Set up a valve object for each datapath
         self.valves = {}
@@ -124,6 +126,44 @@ class Faucet(app_manager.RyuApp):
         self.bgp_speaker = None
         self._reset_bgp()
 
+        wsgi = kwargs['wsgi']
+        wsgi.register(FaucetRest, {'faucet': self})
+
+    def add_route(self, ip_dst, ip_gw, vip=None, pid=None, local=True):
+        """
+        Args:
+            ip_dst (ipaddr.IPNetwork): destination prefix
+            ip_gw (ipaddr.IPAddress): nexthop
+            virt_ip (ipaddr.IPAddress): Used to calculate MAC for path mapping
+            pid (ipaddr.IPAddress): path identifier
+            local (True/False): whether the Path is local or remote (located at other PE)
+        """
+        for valve in self.valves.values():
+            flowmods = valve.add_route(ip_gw=ip_gw,
+                                       ip_dst=ip_dst,
+                                       vip=vip, pid=pid, local=local)
+            if flowmods:
+                ryudp = self.dpset.get(valve.dp.dp_id)
+                if ryudp is None:
+                    return
+                self._send_flow_msgs(ryudp, flowmods)
+
+    def del_route(self, ip_dst, ip_gw):
+        """
+        Args:
+            ip_dst (ipaddr.IPNetwork): destination prefix
+            ip_gw (ipaddr.IPAddress): nexthop
+        """
+        for valve in self.valves.values():
+            flowmods = valve.del_route(ip_dst=ip_dst,
+                                       ip_gw=ip_gw)
+            if flowmods:
+                ryudp = self.dpset.get(valve.dp.dp_id)
+                if ryudp is None:
+                    return
+
+                self._send_flow_msgs(ryudp, flowmods)
+
     def _load_static_routes(self):
         route_conf = route_parser(self.config_file, self.logname)
         if route_conf:
@@ -132,9 +172,7 @@ class Faucet(app_manager.RyuApp):
                 ip_gw = ipaddr.IPAddress(route['ip_gw'])
                 ip_dst = ipaddr.IPNetwork(route['ip_dst'])
                 assert ip_gw.version == ip_dst.version
-                for valve in self.valves.values():
-                    valve.add_route(ip_dst=ip_dst, ip_gw=ip_gw)
-
+                self.add_route(ip_dst=ip_dst, ip_gw=ip_gw)
 
     def _bgp_route_handler(self, path_change):
         """Handle a BGP change event.
