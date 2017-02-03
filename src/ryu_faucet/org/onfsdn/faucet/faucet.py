@@ -221,27 +221,34 @@ class Faucet(app_manager.RyuApp):
         flowmods = []
         valve = self.valves[vlan.dp_id]
         ryudp = self.dpset.get(valve.dp.dp_id)
+        flag = False
         for connected_network in vlan.controller_ips:
             if nexthop in connected_network:
                 if nexthop == connected_network.ip:
                     self.logger.error(
                         'BGP nexthop %s for prefix %s cannot be us',
                         nexthop, prefix)
-                elif withdraw:
-                    self.logger.info(
-                        'BGP withdraw %s nexthop %s',
-                        prefix, nexthop)
-                    flowmods = valve.del_route(vlan, prefix)
+                    return
                 else:
-                    self.logger.info(
-                        'BGP add %s nexthop %s', prefix, nexthop)
-                    flowmods = valve.add_route(vlan, nexthop, prefix)
-                if flowmods:
-                    self._send_flow_msgs(ryudp, flowmods)
-                return
-        self.logger.error(
-            'BGP nexthop %s for prefix %s is not a connected network',
-            nexthop, prefix)
+                    flag = True
+                    break
+
+        if flag:
+            if withdraw:
+                self.logger.info(
+                    'BGP withdraw %s nexthop %s',
+                    prefix, nexthop)
+                flowmods = valve.del_route(vlan, prefix)
+            else:
+                self.logger.info(
+                    'BGP add %s nexthop %s', prefix, nexthop)
+                flowmods = valve.add_route(vlan, nexthop, prefix)
+            if flowmods:
+                self._send_flow_msgs(ryudp, flowmods)
+        else:
+            self.logger.error(
+                'BGP nexthop %s for prefix %s is not a connected network',
+                nexthop, prefix)
 
     def _create_bgp_speaker_for_vlan(self, vlan):
         """Set up BGP speaker for an individual VLAN if required.
