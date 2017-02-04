@@ -94,11 +94,12 @@ class VLAN(Conf):
             for route in self.routes:
                 ip_gw = ipaddr.IPAddress(route['ip_gw'])
                 ip_dst = ipaddr.IPNetwork(route['ip_dst'])
+                pid = route.get('pid', 0)
                 assert ip_gw.version == ip_dst.version
                 if ip_gw.version == 4:
-                    self.ipv4_routes[ip_dst] = ip_gw
+                    self.ipv4_routes[(ip_dst,pid)] = ip_gw
                 else:
-                    self.ipv6_routes[ip_dst] = ip_gw
+                    self.ipv6_routes[(ip_dst,pid)] = ip_gw
 
     @property
     def ipv4_routes(self):

@@ -121,10 +121,10 @@ class Valve(object):
                 'arp_tpa', 'ipv4_src'),
             self.dp.ipv4_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'ipv4_src', 'ipv4_dst'),
+                'ipv4_src', 'ipv4_dst', 'metadata'),
             self.dp.ipv6_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'icmpv6_type', 'ipv6_dst'),
+                'icmpv6_type', 'ipv6_dst', 'metadata'),
             self.dp.eth_dst_table: (
                 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
@@ -174,12 +174,14 @@ class Valve(object):
                        eth_type=None, eth_src=None,
                        eth_dst=None, eth_dst_mask=None,
                        ipv6_nd_target=None, icmpv6_type=None,
-                       nw_proto=None, nw_src=None, nw_dst=None):
+                       nw_proto=None, nw_src=None, nw_dst=None,
+                       mpls_label=None,
+                       metadata=None, metadata_mask=None):
         """Compose an OpenFlow match rule."""
         match_dict = valve_of.build_match_dict(
             in_port, vlan, eth_type, eth_src,
             eth_dst, eth_dst_mask, ipv6_nd_target, icmpv6_type,
-            nw_proto, nw_src, nw_dst)
+            nw_proto, nw_src, nw_dst, mpls_label, metadata, metadata_mask)
         if table_id != self.dp.port_acl_table\
                 and table_id != self.dp.vlan_acl_table:
             assert table_id in self.TABLE_MATCH_TYPES,\
@@ -964,19 +966,19 @@ class Valve(object):
                     vlan, controller_ip, controller_ip_host))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pid=0):
         """Add route to VLAN routing table."""
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.add_route(vlan, ip_gw, ip_dst)
+            return self.ipv6_route_manager.add_route(vlan, ip_gw, ip_dst, pid)
         else:
-            return self.ipv4_route_manager.add_route(vlan, ip_gw, ip_dst)
+            return self.ipv4_route_manager.add_route(vlan, ip_gw, ip_dst, pid)
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pid=0):
         """Delete route from VLAN routing table."""
         if ip_dst.version == 6:
-            return self.ipv6_route_manager.del_route(vlan, ip_dst)
+            return self.ipv6_route_manager.del_route(vlan, ip_dst, pid)
         else:
-            return self.ipv4_route_manager.del_route(vlan, ip_dst)
+            return self.ipv4_route_manager.del_route(vlan, ip_dst, pid)
 
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.

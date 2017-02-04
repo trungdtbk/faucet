@@ -262,7 +262,7 @@ class Faucet(app_manager.RyuApp):
             bgp_speaker.prefix_add(
                 prefix=str(prefix), next_hop=str(controller_ip.ip))
         for route_table in (vlan.ipv4_routes, vlan.ipv6_routes):
-            for ip_dst, ip_gw in route_table.iteritems():
+            for (ip_dst, pid), ip_gw in route_table.iteritems():
                 bgp_speaker.prefix_add(
                     prefix=str(ip_dst), next_hop=str(ip_gw))
         for bgp_neighbor_address in vlan.bgp_neighbor_addresses:

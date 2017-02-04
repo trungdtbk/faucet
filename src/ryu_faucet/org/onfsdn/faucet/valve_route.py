@@ -89,12 +89,14 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated=None):
+    def _add_resolved_route(self, vlan, pid, ip_gw, ip_dst, eth_dst,
+                            is_updated=None):
         ofmsgs = []
         if is_updated is not None:
             in_match = self.valve_in_match(
                 self.fib_table, vlan=vlan,
-                eth_type=self._eth_type(), nw_dst=ip_dst)
+                eth_type=self._eth_type(), nw_dst=ip_dst,
+                metadata=pid)
             prefixlen = ipaddr.IPNetwork(ip_dst).prefixlen
             priority = self.route_priority + prefixlen
             if is_updated:
@@ -163,10 +165,10 @@ class ValveRouteManager(object):
                     group_id=group_id,
                     buckets=[valve_of.bucket(actions=actions)]))
 
-            for ip_dst, ip_gw in routes.iteritems():
+            for (ip_dst, pid), ip_gw in routes.iteritems():
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
-                        vlan, ip_gw, ip_dst, eth_src, is_updated))
+                        vlan, pid, ip_gw, ip_dst, eth_src, is_updated))
         now = time.time()
         link_neighbor = LinkNeighbor(eth_src, now)
         neighbor_cache[resolved_ip_gw] = link_neighbor
@@ -200,7 +202,7 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pid=0):
         """Add a route to the RIB.
 
         Args:
@@ -213,11 +215,12 @@ class ValveRouteManager(object):
         ofmsgs = []
         routes = self._vlan_routes(vlan)
         neighbor_cache = self._vlan_neighbor_cache(vlan)
-        routes[ip_dst] = ip_gw
+        routes[(ip_dst, pid)] = ip_gw
         if ip_gw in neighbor_cache:
             eth_dst = neighbor_cache[ip_gw].eth_src
             ofmsgs.extend(self._add_resolved_route(
                 vlan=vlan,
+                pid=pid,
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
                 eth_dst=eth_dst,
@@ -247,7 +250,7 @@ class ValveRouteManager(object):
         """
         pass
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pid=0):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
@@ -260,8 +263,8 @@ class ValveRouteManager(object):
         """
         ofmsgs = []
         routes = self._vlan_routes(vlan)
-        if ip_dst in routes:
-            del routes[ip_dst]
+        if (ip_dst, pid) in routes:
+            del routes[(ip_dst, pid)]
             route_match = self.valve_in_match(
                 self.fib_table, vlan=vlan,
                 eth_type=self._eth_type(), nw_dst=ip_dst)
