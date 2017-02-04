@@ -163,10 +163,23 @@ class ValveRouteManager(object):
                     group_id=group_id,
                     buckets=[valve_of.bucket(actions=actions)]))
 
+            resolved_routes = []
+            unresolved_routes = {}
             for ip_dst, ip_gw in routes.iteritems():
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
                         vlan, ip_gw, ip_dst, eth_src, is_updated))
+                    resolved_routes.append(ip_dst)
+                else:
+                    unresolved_routes[ip_dst] = ip_gw
+
+            for ip_dst, ip_gw in unresolved_routes.iteritems():
+                for dst in resolved_routes:
+                    if ip_gw in dst:
+                        ofmsgs.extend(self._add_resolved_route(
+                            vlan, resolved_ip_gw, ip_dst, eth_src, is_updated))
+                        break
+
         now = time.time()
         link_neighbor = LinkNeighbor(eth_src, now)
         neighbor_cache[resolved_ip_gw] = link_neighbor

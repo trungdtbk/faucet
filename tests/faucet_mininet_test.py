@@ -754,6 +754,79 @@ group test {
         self.stop_exabgp()
 
 
+class FaucetSingleUntaggedBGPIPv4RouteIndirectTest(FaucetUntaggedTest):
+    """Test IPv4 routing and import from BGP with routes having indirectly
+    connected nexthop."""
+
+    CONFIG_GLOBAL = """
+vlans:
+    100:
+        description: "untagged"
+        controller_ips: ["10.0.0.254/24"]
+        bgp_port: 9179
+        bgp_as: 1
+        bgp_routerid: "1.1.1.1"
+        bgp_neighbor_addresses: ["127.0.0.1"]
+        bgp_neighbor_as: 2
+        routes:
+            - route:
+                ip_dst: 10.99.99.0/24
+                ip_gw: 10.0.0.1
+"""
+
+    CONFIG = """
+        arp_neighbor_timeout: 2
+        interfaces:
+            %(port_1)d:
+                native_vlan: 100
+                description: "b1"
+            %(port_2)d:
+                native_vlan: 100
+                description: "b2"
+            %(port_3)d:
+                native_vlan: 100
+                description: "b3"
+            %(port_4)d:
+                native_vlan: 100
+                description: "b4"
+"""
+
+    exabgp_conf = """
+group test {
+  router-id 2.2.2.2;
+  neighbor 127.0.0.1 {
+    passive;
+    local-address 127.0.0.1;
+    peer-as 1;
+    local-as 2;
+    static {
+      route 10.0.1.0/24 next-hop 10.99.99.1 local-preference 100;
+      route 10.0.2.0/24 next-hop 10.99.99.2 local-preference 100;
+      route 10.0.3.0/24 next-hop 10.99.99.2 local-preference 100;
+   }
+ }
+}
+"""
+    exabgp_log = None
+
+    def pre_start_net(self):
+        self.exabgp_log = self.start_exabgp(self.exabgp_conf)
+
+    def test_untagged(self):
+        """Test IPv4 routing, and BGP routes received."""
+        first_host, second_host = self.net.hosts[:2]
+        # wait until 10.0.0.1 has been resolved
+        self.wait_for_route_as_flow(
+            first_host.MAC(), ipaddr.IPv4Network('10.99.99.0/24'))
+        self.wait_bgp_up(self.exabgp_log)
+        self.wait_exabgp_sent_updates(self.exabgp_log)
+        self.wait_for_route_as_flow(
+            second_host.MAC(), ipaddr.IPv4Network('10.0.3.0/24'))
+        self.verify_ipv4_routing_mesh()
+        self.flap_all_switch_ports()
+        self.verify_ipv4_routing_mesh()
+        self.stop_exabgp()
+
 class FaucetSingleUntaggedIPv4RouteTest(FaucetUntaggedTest):
     """Test IPv4 routing and export to BGP."""
 
