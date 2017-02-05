@@ -57,6 +57,19 @@ class ValveRouteManager(object):
         self.use_group_table = use_group_table
         self.ip_gw_to_group_id = {}
 
+    def _get_mac(self, pid):
+        """Return a MAC address corresponding to path PID."""
+        ofset = 10
+        if pid == 0:
+            return self.faucet_mac
+        else:
+            ip = ipaddr.IPAddress(pid + ofset)
+            return self.faucet_mac[:5] + ':{:02X}:{:02X}:{:02X}:{:02X}'.format(
+                    *map(int, str(ip).split('.')))
+
+    def _vlan_path_map(self, vlan):
+        pass
+
     def _vlan_vid(self, vlan, in_port):
         vid = None
         if vlan.port_is_tagged(in_port):
@@ -275,9 +288,28 @@ class ValveRouteManager(object):
     def control_plane_handler(self, in_port, vlan, eth_src, eth_dst, pkt):
         pass
 
+    def add_path_map_flows(self, vlan):
+        ofmsgs = []
+        for pid in set(self._vlan_path_map(vlan).itervalues()):
+            ofmsgs.append(self.valve_flowmod(
+                self.eth_src_table,
+                self.valve_in_match(
+                    self.eth_src_table,
+                    eth_type=self._eth_type(),
+                    eth_dst=self._get_mac(pid),
+                    vlan=vlan),
+                priority=self.route_priority + 1,
+                inst=[
+                    valve_of.write_metadata(pid),
+                    valve_of.goto_table(self.fib_table)]))
+        return ofmsgs
+
 
 class ValveIPv4RouteManager(ValveRouteManager):
     """Implement IPv4 RIB/FIB."""
+
+    def _vlan_path_map(self,vlan):
+        return vlan.ipv4_host_to_path
 
     def _eth_type(self):
         return ether.ETH_TYPE_IP
@@ -347,7 +379,8 @@ class ValveIPv4RouteManager(ValveRouteManager):
                 vlan.ip_in_controller_subnet(dst_ip)):
             vid = self._vlan_vid(vlan, in_port)
             arp_reply = valve_packet.arp_reply(
-                self.faucet_mac, eth_src, vid, dst_ip, src_ip)
+                self._get_mac(vlan.get_pid(src_ip, dst_ip)),
+                eth_src, vid, dst_ip, src_ip)
             ofmsgs.append(valve_of.packetout(in_port, arp_reply.data))
             ofmsgs.extend(self._add_host_fib_route(vlan, src_ip))
             self.logger.info(
@@ -392,6 +425,9 @@ class ValveIPv4RouteManager(ValveRouteManager):
 
 class ValveIPv6RouteManager(ValveRouteManager):
     """Implement IPv6 FIB."""
+
+    def _vlan_path_map(self,vlan):
+        return vlan.ipv6_host_to_path
 
     def _eth_type(self):
         return ether.ETH_TYPE_IPV6
@@ -472,7 +508,8 @@ class ValveIPv6RouteManager(ValveRouteManager):
         if (icmpv6_type == icmpv6.ND_NEIGHBOR_SOLICIT and
                 vlan.ip_in_controller_subnet(src_ip)):
             nd_reply = valve_packet.nd_reply(
-                self.faucet_mac, eth_src, vid,
+                self._get_mac(vlan.get_pid(src_ip, dst_ip)),
+                eth_src, vid,
                 icmpv6_pkt.data.dst, src_ip, ipv6_pkt.hop_limit)
             ofmsgs.extend([valve_of.packetout(in_port, nd_reply.data)])
             ofmsgs.extend(self._add_host_fib_route(vlan, src_ip))

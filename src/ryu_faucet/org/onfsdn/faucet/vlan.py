@@ -35,6 +35,7 @@ class VLAN(Conf):
     max_hosts = None
     unicast_flood = None
     acl_in = None
+    path_map = None
     # Define dynamic variables with prefix dyn_ to distinguish from variables set
     # configuration
     dyn_ipv4_routes = None
@@ -59,6 +60,7 @@ class VLAN(Conf):
         'bgp_neighbor_as': None,
         'routes': None,
         'max_hosts': None,
+        'path_map': None,
         }
 
 
@@ -100,6 +102,19 @@ class VLAN(Conf):
                     self.ipv4_routes[(ip_dst,pid)] = ip_gw
                 else:
                     self.ipv6_routes[(ip_dst,pid)] = ip_gw
+
+        self.ipv4_host_to_path = {}
+        self.ipv6_host_to_path = {}
+        if self.path_map:
+            for host_ip_str in self.path_map.iterkeys():
+                for pid in self.path_map[host_ip_str].iterkeys():
+                    vip = ipaddr.IPAddress(self.path_map[host_ip_str][pid])
+                    if self.ip_in_controller_subnet(vip):
+                        host_ip = ipaddr.IPAddress(host_ip_str)
+                        if host_ip.version == 4:
+                            self.ipv4_host_to_path[(host_ip, vip)] = pid
+                        else:
+                            self.ipv6_host_to_path[(host_ip, vip)] = pid
 
     @property
     def ipv4_routes(self):
@@ -150,11 +165,18 @@ class VLAN(Conf):
         self._set_default('bgp_neighbor_as', self.bgp_neighbour_as)
         self._set_default(
             'bgp_neighbor_addresses', self.bgp_neighbour_addresses)
+        self._set_default('path_map', {})
 
     def __str__(self):
         port_list = [str(x) for x in self.get_ports()]
         ports = ','.join(port_list)
         return 'vid:%s ports:%s' % (self.vid, ports)
+
+    def get_pid(self, host_ip, vip):
+        if host_ip.version == 4:
+            return self.ipv4_host_to_path.get((host_ip, vip), 0)
+        else:
+            return self.ipv6_host_to_path.get((host_ip, vip), 0)
 
     def get_ports(self):
         return self.tagged + self.untagged

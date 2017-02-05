@@ -394,6 +394,13 @@ class Valve(object):
             priority=self.dp.low_priority,
             inst=[valve_of.goto_table(self.dp.eth_dst_table)])]
 
+    def _add_path_map_flows(self):
+        ofmsgs = []
+        for vlan in self.dp.vlans.values():
+            ofmsgs.extend(self.ipv4_route_manager.add_path_map_flows(vlan))
+            ofmsgs.extend(self.ipv6_route_manager.add_path_map_flows(vlan))
+        return ofmsgs
+
     def _add_default_flows(self):
         """Configure datapath with necessary default tables and rules."""
         ofmsgs = []
@@ -401,6 +408,7 @@ class Valve(object):
         ofmsgs.extend(self._add_default_drop_flows())
         ofmsgs.extend(self._add_vlan_flood_flow())
         ofmsgs.extend(self._add_controller_learn_flow())
+        ofmsgs.extend(self._add_path_map_flows())
         return ofmsgs
 
     def _add_vlan(self, vlan, all_port_nums):
