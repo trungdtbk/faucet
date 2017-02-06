@@ -31,6 +31,7 @@ import valve_host
 import valve_of
 import valve_packet
 import valve_route
+import valve_tunnel
 import util
 
 from ryu.lib import mac
@@ -87,14 +88,16 @@ class Valve(object):
             self.dp.highest_priority,
             self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
             self.valve_flowcontroller,
-            self.dp.group_table)
+            self.dp.group_table,
+            self.dp.tunnel_table, self.get_tunnel)
         self.ipv6_route_manager = valve_route.ValveIPv6RouteManager(
             self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
             self.dp.ipv6_fib_table, self.dp.eth_src_table, self.dp.eth_dst_table,
             self.dp.highest_priority,
             self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
             self.valve_flowcontroller,
-            self.dp.group_table)
+            self.dp.group_table,
+            self.dp.tunnel_table, self.get_tunnel)
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.flood_table, self.dp.low_priority,
             self.valve_in_match, self.valve_flowmod,
@@ -105,6 +108,16 @@ class Valve(object):
             self.dp.timeout, self.dp.low_priority, self.dp.highest_priority,
             self.valve_in_match, self.valve_flowmod, self.valve_flowdel,
             self.valve_flowdrop)
+        self.tunnel_manager = valve_tunnel.TunnelManager(
+            self.logger, self.valve_in_match, self.valve_flowmod,
+            self.dp.port_acl_table, self.dp.eth_src_table, self.dp.vlan_table,
+            self.dp.tunnel_table, self.dp.eth_dst_table,
+            self.dp.highest_priority, self.dp.vlans)
+
+
+    def get_tunnel(self, vlan, rem_ip):
+        """Get tunnel associated with rem_ip"""
+        return self.tunnel_manager.get_tunnel(vlan, rem_ip)
 
     def _register_table_match_types(self):
         # TODO: functional flow managers should be able to register
@@ -116,7 +129,7 @@ class Valve(object):
             # be split further into two tables for IPv4/IPv6 entries.
             self.dp.eth_src_table: (
                 'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type',
-                'ip_proto',
+                'ip_proto', 'mpls_label',
                 'icmpv6_type', 'ipv6_nd_target',
                 'arp_tpa', 'ipv4_src'),
             self.dp.ipv4_fib_table: (
@@ -129,6 +142,9 @@ class Valve(object):
                 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
                 'in_port', 'vlan_vid', 'eth_dst'),
+            self.dp.tunnel_table: (
+                'vlan_vid', 'eth_type', 'ip_proto',
+                'ipv4_src', 'ipv4_dst', 'metadata'),
         }
 
     def _in_port_tables(self):
@@ -220,7 +236,8 @@ class Valve(object):
             self.dp.ipv4_fib_table,
             self.dp.ipv6_fib_table,
             self.dp.eth_dst_table,
-            self.dp.flood_table)
+            self.dp.flood_table,
+            self.dp.tunnel_table)
 
     def valve_flowmod(self, table_id, match=None, priority=None,
                       inst=None, command=ofp.OFPFC_ADD, out_port=0,
@@ -394,11 +411,12 @@ class Valve(object):
             priority=self.dp.low_priority,
             inst=[valve_of.goto_table(self.dp.eth_dst_table)])]
 
-    def _add_path_map_flows(self):
+    def _add_multipath_flows(self):
         ofmsgs = []
         for vlan in self.dp.vlans.values():
             ofmsgs.extend(self.ipv4_route_manager.add_path_map_flows(vlan))
             ofmsgs.extend(self.ipv6_route_manager.add_path_map_flows(vlan))
+            ofmsgs.extend(self.tunnel_manager.add_tunnel_flows(vlan))
         return ofmsgs
 
     def _add_default_flows(self):
@@ -408,7 +426,7 @@ class Valve(object):
         ofmsgs.extend(self._add_default_drop_flows())
         ofmsgs.extend(self._add_vlan_flood_flow())
         ofmsgs.extend(self._add_controller_learn_flow())
-        ofmsgs.extend(self._add_path_map_flows())
+        ofmsgs.extend(self._add_multipath_flows())
         return ofmsgs
 
     def _add_vlan(self, vlan, all_port_nums):

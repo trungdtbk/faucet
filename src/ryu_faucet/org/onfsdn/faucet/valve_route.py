@@ -42,13 +42,16 @@ class ValveRouteManager(object):
     def __init__(self, logger, faucet_mac, arp_neighbor_timeout,
                  fib_table, eth_src_table, eth_dst_table, route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
-                 valve_flowcontroller, use_group_table):
+                 valve_flowcontroller, use_group_table,
+                 tunnel_table, get_tunnel):
         self.logger = logger
         self.faucet_mac = faucet_mac
         self.arp_neighbor_timeout = arp_neighbor_timeout
         self.fib_table = fib_table
         self.eth_src_table = eth_src_table
         self.eth_dst_table = eth_dst_table
+        self.tunnel_table = tunnel_table
+        self.get_tunnel = get_tunnel
         self.route_priority = route_priority
         self.valve_in_match = valve_in_match
         self.valve_flowdel = valve_flowdel
@@ -57,15 +60,13 @@ class ValveRouteManager(object):
         self.use_group_table = use_group_table
         self.ip_gw_to_group_id = {}
 
-    def _get_mac(self, pid):
-        """Return a MAC address corresponding to path PID."""
-        ofset = 10
-        if pid == 0:
+    def _get_mac(self, vip=None):
+        """Return a MAC address corresponding to Virtual IP."""
+        if not vip:
             return self.faucet_mac
         else:
-            ip = ipaddr.IPAddress(pid + ofset)
             return self.faucet_mac[:5] + ':{:02X}:{:02X}:{:02X}:{:02X}'.format(
-                    *map(int, str(ip).split('.')))
+                    *map(int, str(vip).split('.')))
 
     def _vlan_path_map(self, vlan):
         pass
@@ -102,14 +103,15 @@ class ValveRouteManager(object):
                     port.number, resolver_pkt.data))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, pid, ip_gw, ip_dst, eth_dst,
+    def _add_resolved_route(self, vlan, loc_pid, rem_pid,
+                            ip_gw, ip_dst, eth_dst,
                             is_updated=None):
         ofmsgs = []
         if is_updated is not None:
             in_match = self.valve_in_match(
                 self.fib_table, vlan=vlan,
                 eth_type=self._eth_type(), nw_dst=ip_dst,
-                metadata=pid)
+                metadata=loc_pid)
             prefixlen = ipaddr.IPNetwork(ip_dst).prefixlen
             priority = self.route_priority + prefixlen
             if is_updated:
@@ -128,11 +130,28 @@ class ValveRouteManager(object):
                 inst = [valve_of.apply_actions([valve_of.group_act(
                     group_id=self.ip_gw_to_group_id[ip_gw])])]
             else:
-                inst = [valve_of.apply_actions([
-                    valve_of.set_eth_src(self.faucet_mac),
-                    valve_of.set_eth_dst(eth_dst),
-                    valve_of.dec_ip_ttl()]),
-                        valve_of.goto_table(self.eth_dst_table)]
+                #TODO: check this out. without pop_vlan(), the push_mpls
+                # seems to corrupt the packet.
+                next_table = self.eth_dst_table
+                actions = [
+                        valve_of.set_eth_src(self._get_mac()),
+                        valve_of.set_eth_dst(eth_dst),
+                        valve_of.dec_ip_ttl()]
+
+                if rem_pid:
+                    actions.append(valve_of.pop_vlan())
+                    actions.extend(valve_of.push_mpls_act(rem_pid))
+                    actions.extend(valve_of.push_vlan_act(vlan.vid))
+
+                inst = [valve_of.apply_actions(actions)]
+
+                tun = self.get_tunnel(vlan, ip_gw)
+                if tun:
+                    next_table = self.tunnel_table
+                    inst.append(valve_of.write_metadata(tun.id))
+
+                inst.append(valve_of.goto_table(next_table))
+
             ofmsgs.append(self.valve_flowmod(
                 self.fib_table,
                 in_match,
@@ -178,10 +197,25 @@ class ValveRouteManager(object):
                     group_id=group_id,
                     buckets=[valve_of.bucket(actions=actions)]))
 
-            for (ip_dst, pid), ip_gw in routes.iteritems():
+            unresolved_routes = {}
+            resolved_routes = []
+            for (ip_dst, loc_pid, rem_pid), ip_gw in routes.iteritems():
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
-                        vlan, pid, ip_gw, ip_dst, eth_src, is_updated))
+                        vlan, loc_pid, rem_pid,
+                        ip_gw, ip_dst, eth_src, is_updated))
+                    resolved_routes.append(ip_dst)
+                else:
+                    unresolved_routes[(ip_dst, loc_pid, rem_pid)] = ip_gw
+
+            for (ip_dst, loc_pid, rem_pid), ip_gw in unresolved_routes.iteritems():
+                for dst in resolved_routes:
+                    if ip_gw in dst:
+                        ofmsgs.extend(self._add_resolved_route(
+                            vlan, loc_pid, rem_pid,
+                            ip_gw, ip_dst, eth_src, is_updated))
+                        break
+
         now = time.time()
         link_neighbor = LinkNeighbor(eth_src, now)
         neighbor_cache[resolved_ip_gw] = link_neighbor
@@ -215,7 +249,7 @@ class ValveRouteManager(object):
                                 ip_gw, controller_ip, vlan, ports))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst, pid=0):
+    def add_route(self, vlan, ip_gw, ip_dst, loc_pid=0, rem_pid=0):
         """Add a route to the RIB.
 
         Args:
@@ -228,12 +262,13 @@ class ValveRouteManager(object):
         ofmsgs = []
         routes = self._vlan_routes(vlan)
         neighbor_cache = self._vlan_neighbor_cache(vlan)
-        routes[(ip_dst, pid)] = ip_gw
+        routes[(ip_dst, loc_pid, rem_pid)] = ip_gw
         if ip_gw in neighbor_cache:
             eth_dst = neighbor_cache[ip_gw].eth_src
             ofmsgs.extend(self._add_resolved_route(
                 vlan=vlan,
-                pid=pid,
+                loc_pid=loc_pid,
+                rem_pid=rem_pid,
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
                 eth_dst=eth_dst,
@@ -290,13 +325,29 @@ class ValveRouteManager(object):
 
     def add_path_map_flows(self, vlan):
         ofmsgs = []
-        for pid in set(self._vlan_path_map(vlan).itervalues()):
+        for vip, pid in self._vlan_path_map(vlan).iteritems():
+            ofmsgs.append(self.valve_flowmod(
+                self.eth_src_table,
+                match=self.valve_in_match(
+                    self.eth_src_table,
+                    eth_type=ether.ETH_TYPE_MPLS,
+                    mpls_label=pid,
+                    eth_dst=self.faucet_mac),
+                priority=self.route_priority + 1,
+                inst=[
+                    valve_of.apply_actions(
+                        [valve_of.pop_mpls_act(
+                            eth_type=ether.ETH_TYPE_IP)] +
+                         valve_of.push_vlan_act(vlan.vid)),
+                    valve_of.write_metadata(pid),
+                    valve_of.goto_table(self.fib_table)]))
+
             ofmsgs.append(self.valve_flowmod(
                 self.eth_src_table,
                 self.valve_in_match(
                     self.eth_src_table,
                     eth_type=self._eth_type(),
-                    eth_dst=self._get_mac(pid),
+                    eth_dst=self._get_mac(vip),
                     vlan=vlan),
                 priority=self.route_priority + 1,
                 inst=[
@@ -379,7 +430,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
                 vlan.ip_in_controller_subnet(dst_ip)):
             vid = self._vlan_vid(vlan, in_port)
             arp_reply = valve_packet.arp_reply(
-                self._get_mac(vlan.get_pid(src_ip, dst_ip)),
+                self._get_mac(dst_ip),
                 eth_src, vid, dst_ip, src_ip)
             ofmsgs.append(valve_of.packetout(in_port, arp_reply.data))
             ofmsgs.extend(self._add_host_fib_route(vlan, src_ip))
@@ -508,7 +559,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
         if (icmpv6_type == icmpv6.ND_NEIGHBOR_SOLICIT and
                 vlan.ip_in_controller_subnet(src_ip)):
             nd_reply = valve_packet.nd_reply(
-                self._get_mac(vlan.get_pid(src_ip, dst_ip)),
+                self._get_mac(dst_ip),
                 eth_src, vid,
                 icmpv6_pkt.data.dst, src_ip, ipv6_pkt.hop_limit)
             ofmsgs.extend([valve_of.packetout(in_port, nd_reply.data)])

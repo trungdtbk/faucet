@@ -6,7 +6,9 @@ RUN \
     libpython2.7-dev \
     libyaml-dev \
     python-paramiko \
-    python-pip
+    python-pip \
+    net-tools ifupdown \
+    iputils-ping
 
 COPY ./ /faucet-src/
 

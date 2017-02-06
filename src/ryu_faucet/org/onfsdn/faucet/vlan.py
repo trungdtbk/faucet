@@ -36,6 +36,7 @@ class VLAN(Conf):
     unicast_flood = None
     acl_in = None
     path_map = None
+    tunnels = None
     # Define dynamic variables with prefix dyn_ to distinguish from variables set
     # configuration
     dyn_ipv4_routes = None
@@ -96,25 +97,32 @@ class VLAN(Conf):
             for route in self.routes:
                 ip_gw = ipaddr.IPAddress(route['ip_gw'])
                 ip_dst = ipaddr.IPNetwork(route['ip_dst'])
-                pid = route.get('pid', 0)
+                loc_pid = route.get('loc_pid', 0)
+                rem_pid = route.get('rem_pid', 0)
                 assert ip_gw.version == ip_dst.version
                 if ip_gw.version == 4:
-                    self.ipv4_routes[(ip_dst,pid)] = ip_gw
+                    self.ipv4_routes[(ip_dst,loc_pid, rem_pid)] = ip_gw
                 else:
-                    self.ipv6_routes[(ip_dst,pid)] = ip_gw
+                    self.ipv6_routes[(ip_dst,loc_pid, rem_pid)] = ip_gw
 
         self.ipv4_host_to_path = {}
         self.ipv6_host_to_path = {}
         if self.path_map:
-            for host_ip_str in self.path_map.iterkeys():
-                for pid in self.path_map[host_ip_str].iterkeys():
-                    vip = ipaddr.IPAddress(self.path_map[host_ip_str][pid])
-                    if self.ip_in_controller_subnet(vip):
-                        host_ip = ipaddr.IPAddress(host_ip_str)
-                        if host_ip.version == 4:
-                            self.ipv4_host_to_path[(host_ip, vip)] = pid
-                        else:
-                            self.ipv6_host_to_path[(host_ip, vip)] = pid
+            for entry in self.path_map.itervalues():
+                vip = ipaddr.IPAddress(entry['vip'])
+                pid = entry['pid']
+                if self.ip_in_controller_subnet(vip):
+                    if vip.version == 4:
+                        self.ipv4_host_to_path[vip] = pid
+                    else:
+                        self.ipv6_host_to_path[vip] = pid
+
+        tunnels_ = {}
+        if self.tunnels:
+            for tun_id, tun in self.tunnels.iteritems():
+                tunnels_[tun_id] = tun
+        self.tunnels = tunnels_
+
 
     @property
     def ipv4_routes(self):
@@ -166,17 +174,12 @@ class VLAN(Conf):
         self._set_default(
             'bgp_neighbor_addresses', self.bgp_neighbour_addresses)
         self._set_default('path_map', {})
+        self._set_default('tunnels', {})
 
     def __str__(self):
         port_list = [str(x) for x in self.get_ports()]
         ports = ','.join(port_list)
         return 'vid:%s ports:%s' % (self.vid, ports)
-
-    def get_pid(self, host_ip, vip):
-        if host_ip.version == 4:
-            return self.ipv4_host_to_path.get((host_ip, vip), 0)
-        else:
-            return self.ipv6_host_to_path.get((host_ip, vip), 0)
 
     def get_ports(self):
         return self.tagged + self.untagged
