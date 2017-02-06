@@ -4,9 +4,9 @@
 .. meta::
    :keywords: OpenFlow, Ryu, Faucet, VLAN, SDN
 
-======
-Faucet
-======
+========================
+Faucet Multipath Routing
+========================
 
 Faucet is an OpenFlow controller for a layer 2 switch based on Waikato University's `Valve <https://github.com/wandsdn/valve>`_. It handles MAC learning and supports VLANs and ACLs.  It is developed as an application for the `Ryu OpenFlow Controller <http://osrg.github.io/ryu/>`_
 .
@@ -30,6 +30,67 @@ It supports:
 ===============
 Feature Details
 ===============
+
+Multipath Routing
+-----------------
+FIB entries are identified with an PID (i.e. OpenFlow metadata). There can be multiple
+FIB entries per destination prefix. Two end hosts can have two different routes to the
+same prefix.
+
+Multipath routing can be expanded across Faucet instances. MPLS tunnels are established
+between instances allowing an end host attached to one instance to use a specific route
+at another instance.
+
+Example settings:
+Two Faucet instances configured with IP address 10.0.0.254 and 20.0.0.254.
+Below is an example of configuration for instance 1. It has 4 routes to 1.0.0.0/24 (
+3 local and 1 remote at instance 2). It is configured with one tunnel to instance 2
+with MPLS label 2000. 3 mappings are configured.
+Traffic from a host with gateway 10.0.0.240 will be forwarded via route 1 (
+i.e. via 10.0.0.2). Traffic takeing route 3 will be tunnelled to instance 2, where
+it take route 1.
+
+.. code:: yaml
+
+ ---
+ version: 2
+ vlans:
+     100:
+        controller_ips: ["10.0.0.254/24"]
+        routes:
+            - route:
+                    ip_dst: "20.0.0.0/24"
+                    ip_gw: 10.0.0.4"
+            - route:
+                   ip_dst: "1.0.0.0/24"
+                   ip_gw:  "10.0.0.1"
+            - route:
+                    ip_dst: "1.0.0.0/24"
+                    ip_gw: "10.0.0.2"
+                    loc_pid: 1
+            - route:
+                    ip_dst: "1.0.0.0/24"
+                    ip_gw: "10.0.0.3"
+                    loc_pid: 2
+            - route:
+                    ip_dst: "1.0.0.0/24"
+                    ip_gw: "20.0.0.254"
+                    loc_pid: 3
+                    rem_pid: 1
+        tunnels:
+            1:
+                rem_ip: "20.0.0.254"
+                rem_id: 2000
+        path_map:
+            1:
+                vip: "10.0.0.240"
+                pid: 1
+            2:
+                vip: "10.0.0.241"
+                pid: 2
+            3:
+                vip: "10.0.0.242"
+                pid: 3
 
 ACL Support
 -----------
