@@ -30,7 +30,6 @@ class DP(Conf):
     ports = None
     routers = None
     running = False
-    influxdb_stats = False
     name = None
     dp_id = None
     configured = False
@@ -65,6 +64,7 @@ class DP(Conf):
         'dp_id': None,
         # Name for this dp, used for stats reporting and configuration
         'name': None,
+        'interfaces': {},
         'table_offset': 0,
         'port_acl_table': None,
         # The table for internally associating vlans
@@ -126,6 +126,9 @@ class DP(Conf):
 
     def __init__(self, _id, conf):
         self._id = _id
+        sub_conf_names = set(conf.keys())
+        unknown_conf_names = sub_conf_names - set(self.defaults.keys())
+        assert not unknown_conf_names, 'unknown config items in DP: %s' % unknown_conf_names
         self.update(conf)
         self.set_defaults()
         self.acls = {}
@@ -328,10 +331,12 @@ class DP(Conf):
                                     port = self.ports[port_no]
                                     port.mirror_destination = True
                             if 'output' in attrib_value:
-                                port_name = attrib_value['output']['port']
-                                port_no = resolve_port_no(port_name)
-                                if port_no is not None:
-                                    attrib_value['output']['port'] = port_no
+                                output_values = attrib_value['output']
+                                if 'port' in output_values:
+                                    port_name = output_values['port']
+                                    port_no = resolve_port_no(port_name)
+                                    if port_no is not None:
+                                        output_values['port'] = port_no
 
         port_by_name = {}
         for port in list(self.ports.values()):

@@ -36,8 +36,8 @@ def read_config(config_file, logname):
 
 
 def config_file_hash(config_file_name):
-    config_file = open(config_file_name)
-    return hashlib.sha256(config_file.read().encode('utf-8')).hexdigest()
+    with open(config_file_name) as config_file:
+        return hashlib.sha256(config_file.read().encode('utf-8')).hexdigest()
 
 
 def dp_config_path(config_file, parent_file=None):
@@ -55,6 +55,12 @@ def dp_include(config_hashes, config_file, logname, top_confs):
     conf = read_config(config_file, logname)
     if not conf:
         logger.warning('error loading config from file: %s', config_file)
+        return False
+
+    unknown_top_confs = (set(conf.keys()) -
+        set(list(top_confs.keys()) + ['include', 'include-optional', 'version']))
+    if unknown_top_confs:
+        logger.error('unknown top level config items: %s', unknown_top_confs)
         return False
 
     # Add the SHA256 hash for this configuration file, so FAUCET can determine

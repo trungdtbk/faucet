@@ -48,6 +48,13 @@ class ValveHostManager(object):
         self.valve_flowdel = valve_flowdel
         self.valve_flowdrop = valve_flowdrop
 
+    def temp_ban_host_learning_on_port(self, port): 
+        return self.valve_flowdrop(
+            self.eth_src_table,
+            self.valve_in_match(self.eth_src_table, in_port=port.number),
+            priority=(self.low_priority + 1),
+            hard_timeout=self.host_priority)
+
     def temp_ban_host_learning_on_vlan(self, vlan):
         return self.valve_flowdrop(
             self.eth_src_table,
@@ -99,7 +106,10 @@ class ValveHostManager(object):
                     'expiring host %s from vlan %u', eth_src, vlan.vid)
             self.logger.info(
                 '%u recently active hosts on vlan %u',
-                len(vlan.host_cache), vlan.vid)
+                self.hosts_learned_on_vlan_count(vlan), vlan.vid)
+
+    def hosts_learned_on_vlan_count(self, vlan):
+        return len(vlan.host_cache)
 
     def learn_host_on_vlan_port(self, port, vlan, eth_src):
         now = time.time()
@@ -167,6 +177,8 @@ class ValveHostManager(object):
         vlan.host_cache[eth_src] = host_cache_entry
 
         self.logger.info(
-            'learned %u hosts on vlan %u', len(vlan.host_cache), vlan.vid)
+            'learned %u hosts on vlan %u',
+            self.hosts_learned_on_vlan_count(vlan),
+            vlan.vid)
 
         return ofmsgs

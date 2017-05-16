@@ -24,6 +24,7 @@ import random
 import signal
 
 import ipaddress
+import json
 
 from config_parser import dp_parser
 from config_parser_util import config_file_hash
@@ -31,7 +32,7 @@ from valve_util import btos, dpid_log, get_logger, kill_on_exception, get_sys_pr
 from valve import valve_factory
 import valve_of
 
-from prometheus_client import Counter, start_http_server
+from prometheus_client import Counter, Gauge, start_http_server
 
 from ryu.base import app_manager
 from ryu.controller.handler import CONFIG_DISPATCHER
@@ -52,8 +53,36 @@ class FaucetMetrics(object):
     """Container class for objects that can be exported to Prometheus."""
 
     def __init__(self):
-        self.packet_ins = Counter(
-            'packet_ins', 'number of OF packet_ins received from DP', ['dpid'])
+        self.of_packet_ins = Counter(
+            'of_packet_ins',
+            'number of OF packet_ins received from DP', ['dpid'])
+        self.of_flowmsgs_sent = Counter(
+            'of_flowmsgs_sent',
+            'number of OF flow messages (and packet outs) sent to DP', ['dpid'])
+        self.of_errors = Counter(
+            'of_errors',
+            'number of OF errors received from DP', ['dpid'])
+        self.of_dp_connections = Counter(
+            'of_dp_connections',
+            'number of OF connections from a DP', ['dpid'])
+        self.of_dp_disconnections = Counter(
+            'of_dp_disconnections',
+            'number of OF connections from a DP', ['dpid'])
+        self.faucet_config_reload_requests = Counter(
+            'faucet_config_reload_requests',
+            'number of config reload requests', [])
+        self.vlan_hosts_learned = Gauge(
+            'vlan_hosts_learned',
+            'number of hosts learned on a vlan', ['dpid', 'vlan'])
+        self.faucet_config_table_names = Gauge(
+            'faucet_config_table_names',
+            'number to names map of FAUCET pipeline tables', ['dpid', 'name'])
+        self.faucet_config_dp_name = Gauge(
+            'faucet_config_dp_name',
+            'map of DP name to DP ID', ['dpid', 'name'])
+        self.bgp_neighbor_uptime_seconds = Gauge(
+            'bgp_neighbor_uptime',
+            'BGP neighbor uptime in seconds', ['dpid', 'vlan', 'neighbor'])
 
 
 class EventFaucetReconfigure(event.EventBase):
@@ -68,6 +97,11 @@ class EventFaucetResolveGateways(event.EventBase):
 
 class EventFaucetHostExpire(event.EventBase):
     """Event used to trigger expiration of host state in controller."""
+    pass
+
+
+class EventFaucetMetricUpdate(event.EventBase):
+    """Event used to trigger update of metrics."""
     pass
 
 
@@ -206,17 +240,21 @@ class Faucet(app_manager.RyuApp):
             self.config_file, self.logname)
         for valve_dp in valve_dps:
             # pylint: disable=no-member
-            valve = valve_factory(valve_dp)
-            if valve is None:
+            valve_cl = valve_factory(valve_dp)
+            if valve_cl is None:
                 self.logger.error(
                     'Hardware type not supported for DP: %s', valve_dp.name)
             else:
-                self.valves[valve_dp.dp_id] = valve(valve_dp, self.logname)
+                valve = valve_cl(valve_dp, self.logname)
+                self.valves[valve_dp.dp_id] = valve
+                valve.update_config_metrics(self.metrics)
 
         self.gateway_resolve_request_thread = hub.spawn(
             self.gateway_resolve_request)
         self.host_expire_request_thread = hub.spawn(
             self.host_expire_request)
+        self.metric_update_request_thread = hub.spawn(
+            self.metric_update_request)
 
         self.dp_bgp_speakers = {}
         self._reset_bgp()
@@ -225,6 +263,17 @@ class Faucet(app_manager.RyuApp):
         api = kwargs['faucet_api']
         api._register(self)
         self.send_event_to_observers(EventFaucetAPIRegistered())
+
+    def _bgp_update_metrics(self):
+        """Update BGP metrics."""
+        for dp_id, bgp_speakers in list(self.dp_bgp_speakers.items()):
+            for vlan, bgp_speaker in list(bgp_speakers.items()):
+                neighbor_states = list(json.loads(bgp_speaker.neighbor_state_get()).items())
+                for neighbor, neighbor_state in neighbor_states:
+                    # pylint: disable=no-member
+                    self.metrics.bgp_neighbor_uptime_seconds.labels(
+                        dpid=hex(dp_id), vlan=vlan.vid, neighbor=neighbor).set(
+                            neighbor_state['info']['uptime'])
 
     def _bgp_route_handler(self, path_change, vlan):
         """Handle a BGP change event.
@@ -317,6 +366,11 @@ class Faucet(app_manager.RyuApp):
             self.send_event('Faucet', EventFaucetHostExpire())
             hub.sleep(5 + random.randint(0, 2))
 
+    def metric_update_request(self):
+        while True:
+            self.send_event('Faucet', EventFaucetMetricUpdate())
+            hub.sleep(5 + random.randint(0, 2))
+
     def _send_flow_msgs(self, ryu_dp, flow_msgs):
         """Send OpenFlow messages to a connected datapath.
 
@@ -332,6 +386,9 @@ class Faucet(app_manager.RyuApp):
         reordered_flow_msgs = valve.valve_flowreorder(flow_msgs)
         valve.ofchannel_log(reordered_flow_msgs)
         for flow_msg in reordered_flow_msgs:
+            # pylint: disable=no-member
+            self.metrics.of_flowmsgs_sent.labels(
+                dpid=hex(dp_id)).inc()
             flow_msg.datapath = ryu_dp
             ryu_dp.send_msg(flow_msg)
 
@@ -378,18 +435,22 @@ class Faucet(app_manager.RyuApp):
             ryu_event (ryu.controller.event.EventReplyBase): triggering event.
         """
         new_config_file = os.getenv('FAUCET_CONFIG', self.config_file)
-        if not self._config_changed(new_config_file):
+        if self._config_changed(new_config_file):
+            self.config_file = new_config_file
+            self.config_hashes, new_dps = dp_parser(
+                new_config_file, self.logname)
+            for new_dp in new_dps:
+                valve = self.valves[new_dp.dp_id]
+                flowmods = valve.reload_config(new_dp)
+                ryudp = self.dpset.get(new_dp.dp_id)
+                if ryudp is not None:
+                    self._send_flow_msgs(ryudp, flowmods)
+                self._reset_bgp()
+                valve.update_config_metrics(self.metrics)
+        else:
             self.logger.info('configuration is unchanged, not reloading')
-            return
-        self.config_file = new_config_file
-        self.config_hashes, new_dps = dp_parser(new_config_file, self.logname)
-        for new_dp in new_dps:
-            # pylint: disable=no-member
-            flowmods = self.valves[new_dp.dp_id].reload_config(new_dp)
-            ryudp = self.dpset.get(new_dp.dp_id)
-            if ryudp is not None:
-                self._send_flow_msgs(ryudp, flowmods)
-            self._reset_bgp()
+        # pylint: disable=no-member
+        self.metrics.faucet_config_reload_requests.inc()
 
     @set_ev_cls(EventFaucetResolveGateways, MAIN_DISPATCHER)
     def resolve_gateways(self, ryu_event):
@@ -413,6 +474,16 @@ class Faucet(app_manager.RyuApp):
         """
         for valve in list(self.valves.values()):
             valve.host_expire()
+            valve.update_metrics(self.metrics)
+
+    @set_ev_cls(EventFaucetMetricUpdate, MAIN_DISPATCHER)
+    def metric_update(self, ryu_event):
+        """Handle a request to update metrics in the controller.
+
+        Args:
+            ryu_event (ryu.controller.event.EventReplyBase): triggering event.
+        """
+        self._bgp_update_metrics()
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER) # pylint: disable=no-member
     @kill_on_exception(exc_logname)
@@ -449,9 +520,13 @@ class Faucet(app_manager.RyuApp):
             return
 
         in_port = msg.match['in_port']
-        self.metrics.packet_ins.labels(dpid=hex(dp_id)).inc() # pylint: disable=no-member
-        flowmods = valve.rcv_packet(dp_id, self.valves, in_port, vlan_vid, pkt)
+         # pylint: disable=no-member
+        self.metrics.of_packet_ins.labels(
+            dpid=hex(dp_id)).inc()
+        flowmods = valve.rcv_packet(
+            dp_id, self.valves, in_port, vlan_vid, pkt)
         self._send_flow_msgs(ryu_dp, flowmods)
+        valve.update_metrics(self.metrics)
 
     @set_ev_cls(ofp_event.EventOFPErrorMsg, MAIN_DISPATCHER) # pylint: disable=no-member
     @kill_on_exception(exc_logname)
@@ -465,6 +540,9 @@ class Faucet(app_manager.RyuApp):
         ryu_dp = msg.datapath
         dp_id = ryu_dp.id
         if dp_id in self.valves:
+            # pylint: disable=no-member
+            self.metrics.of_errors.labels(
+                dpid=hex(dp_id)).inc()
             self.valves[dp_id].ofchannel_log([msg])
             self.logger.error('Got OFError: %s', msg)
         else:
@@ -497,9 +575,12 @@ class Faucet(app_manager.RyuApp):
         ryu_dp = ryu_event.dp
         dp_id = ryu_dp.id
 
+        # Datapath down message
         if not ryu_event.enter:
             if dp_id in self.valves:
-                # Datapath down message
+                # pylint: disable=no-member
+                self.metrics.of_dp_disconnections.labels(
+                    dpid=hex(dp_id)).inc()
                 self.logger.debug('%s disconnected', dpid_log(dp_id))
                 self.valves[dp_id].datapath_disconnect(dp_id)
             else:
@@ -507,6 +588,9 @@ class Faucet(app_manager.RyuApp):
                     'handler_connect_or_disconnect: unknown %s', dpid_log(dp_id))
             return
 
+        # pylint: disable=no-member
+        self.metrics.of_dp_connections.labels(
+            dpid=hex(dp_id)).inc()
         self.logger.debug('%s connected', dpid_log(dp_id))
         self.handler_datapath(ryu_dp)
 
