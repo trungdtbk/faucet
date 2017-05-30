@@ -3,6 +3,8 @@ FROM osrg/ryu
 RUN \
   apt-get update && \
   apt-get install -qy --no-install-recommends \
+    bc \
+    fping \
     gcc \
     git \
     influxdb \
@@ -11,6 +13,7 @@ RUN \
     ladvd \
     libpython2.7-dev \
     libyaml-dev \
+    ndisc6 \
     net-tools \
     netcat-openbsd \
     psmisc \
