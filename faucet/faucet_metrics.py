@@ -25,7 +25,7 @@ from prometheus_client import Counter, Gauge, start_http_server
 class FaucetMetrics(object):
     """Container class for objects that can be exported to Prometheus."""
 
-    def __init__(self, prom_port):
+    def __init__(self, prom_port, prom_addr):
         self.of_packet_ins = Counter(
             'of_packet_ins',
             'number of OF packet_ins received from DP', ['dpid'])
@@ -67,4 +67,12 @@ class FaucetMetrics(object):
             ('max address stored as 64bit number to DP ID, port, VLAN, '
              'and n (maximum number of hosts on the port)'),
             ['dpid', 'port', 'vlan', 'n'])
-        start_http_server(prom_port)
+        self.port_status = Gauge(
+            'port_status',
+            'status of switch ports',
+            ['dpid', 'port'])
+        self.dp_status = Gauge(
+            'dp_status',
+            'status of datapaths',
+            ['dpid'])
+        start_http_server(prom_port, prom_addr)

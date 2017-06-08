@@ -117,7 +117,9 @@ class Faucet(app_manager.RyuApp):
 
         # Start Prometheus
         prom_port = int(os.getenv('FAUCET_PROMETHEUS_PORT', '9244'))
-        self.metrics = faucet_metrics.FaucetMetrics(prom_port)
+        prom_addr = os.getenv('FAUCET_PROMETHEUS_ADDR', '')
+        self.metrics = faucet_metrics.FaucetMetrics(
+            prom_port, prom_addr)
 
         # Start BGP
         self._bgp = faucet_bgp.FaucetBgp(self.logger, self._send_flow_msgs)
@@ -290,7 +292,7 @@ class Faucet(app_manager.RyuApp):
         valve.ofchannel_log([msg])
 
         pkt, vlan_vid = valve_packet.parse_packet_in_pkt(msg)
-        if vlan_vid is None:
+        if pkt is None or vlan_vid is None:
             return
 
         in_port = msg.match['in_port']
@@ -374,11 +376,17 @@ class Faucet(app_manager.RyuApp):
             if ryu_event.enter:
                 self.metrics.of_dp_connections.labels(
                     dpid=hex(dp_id)).inc()
+                # pylint: disable=no-member
+                self.metrics.dp_status.labels(
+                    dpid=hex(dp_id)).set(1)
                 self.logger.debug('%s connected', dpid_log(dp_id))
                 self._handler_datapath(ryu_dp)
             else:
                 self.metrics.of_dp_disconnections.labels(
                     dpid=hex(dp_id)).inc()
+                # pylint: disable=no-member
+                self.metrics.dp_status.labels(
+                    dpid=hex(dp_id)).set(0)
                 self.logger.debug('%s disconnected', dpid_log(dp_id))
                 valve.datapath_disconnect(dp_id)
         else:
@@ -394,7 +402,11 @@ class Faucet(app_manager.RyuApp):
             ryu_event (ryu.controller.dpset.EventDPReconnected): trigger.
         """
         ryu_dp = ryu_event.dp
-        self.logger.debug('%s reconnected', dpid_log(ryu_dp.id))
+        dp_id = ryu_dp.id
+        self.logger.debug('%s reconnected', dpid_log(dp_id))
+        # pylint: disable=no-member
+        self.metrics.dp_status.labels(
+            dpid=hex(dp_id)).set(1)
         self._handler_datapath(ryu_dp)
 
     @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER) # pylint: disable=no-member
@@ -411,18 +423,24 @@ class Faucet(app_manager.RyuApp):
         ofp = msg.datapath.ofproto
         reason = msg.reason
         port_no = msg.desc.port_no
-        port_status = not (msg.desc.state & ofp.OFPPS_LINK_DOWN)
+        port_down = msg.desc.state & ofp.OFPPS_LINK_DOWN
+        port_status = not port_down
         if dp_id in self.valves:
             valve = self.valves[dp_id]
             flowmods = valve.port_status_handler(
                 dp_id, port_no, reason, port_status)
             self._send_flow_msgs(dp_id, flowmods)
+            # pylint: disable=no-member
+            self.metrics.port_status.labels(
+                dpid=hex(dp_id), port=port_no).set(port_status)
         else:
             self.logger.error(
                 'port_status_handler: unknown %s', dpid_log(dp_id))
 
     def get_config(self):
+        """FAUCET API: return config for all Valves."""
         return get_config_for_api(self.valves)
 
     def get_tables(self, dp_id):
+        """FAUCET API: return config tables for one Valve."""
         return self.valves[dp_id].dp.get_tables()

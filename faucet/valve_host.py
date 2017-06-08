@@ -67,7 +67,7 @@ class ValveHostManager(object):
 
     def build_port_out_inst(self, vlan, port):
         dst_act = []
-        if not vlan.port_is_tagged(port.number) and port.stack is None:
+        if not vlan.port_is_tagged(port) and port.stack is None:
             dst_act.append(valve_of.pop_vlan())
         dst_act.append(valve_of.output_port(port.number))
 
@@ -141,9 +141,9 @@ class ValveHostManager(object):
                 priority=(self.host_priority - 2)))
         else:
             # Add a jitter to avoid whole bunch of hosts timeout simultaneously
-            learn_timeout = max(abs(
+            learn_timeout = int(max(abs(
                 self.learn_timeout -
-                (self.learn_jitter / 2) + random.randint(0, self.learn_jitter)), 2)
+                (self.learn_jitter / 2) + random.randint(0, self.learn_jitter)), 2))
             ofmsgs.extend(self.delete_host_from_vlan(eth_src, vlan))
 
         # Update datapath to no longer send packets from this mac to controller
