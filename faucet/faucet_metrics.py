@@ -47,9 +47,9 @@ class FaucetMetrics(object):
         self.vlan_hosts_learned = Gauge(
             'vlan_hosts_learned',
             'number of hosts learned on a vlan', ['dpid', 'vlan'])
-        self.vlan_neighbors = Gauge(
-            'vlan_neighbors',
-            'number of neighbors on a vlan', ['dpid', 'vlan', 'ipv'])
+        self.neighbors = Gauge(
+            'neighbors',
+            'number of neighbors on a dp', ['dpid', 'ipv'])
         self.faucet_config_table_names = Gauge(
             'faucet_config_table_names',
             'number to names map of FAUCET pipeline tables', ['dpid', 'name'])
@@ -58,10 +58,10 @@ class FaucetMetrics(object):
             'map of DP name to DP ID', ['dpid', 'name'])
         self.bgp_neighbor_uptime_seconds = Gauge(
             'bgp_neighbor_uptime',
-            'BGP neighbor uptime in seconds', ['dpid', 'vlan', 'neighbor'])
+            'BGP neighbor uptime in seconds', ['router_id', 'neighbor'])
         self.bgp_neighbor_routes = Gauge(
             'bgp_neighbor_routes',
-            'BGP neighbor route count', ['dpid', 'vlan', 'neighbor', 'ipv'])
+            'BGP neighbor route count', ['router_id', 'neighbor', 'ipv'])
         self.learned_macs = Gauge(
             'learned_macs',
             ('max address stored as 64bit number to DP ID, port, VLAN, '

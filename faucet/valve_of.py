@@ -263,6 +263,15 @@ def barrier():
     """
     return parser.OFPBarrierRequest(None)
 
+def write_metadata(metadata, mask=(1<<64)-1):
+    """Return instruction that add metadata to packets
+    Args:
+        metadata (int): 64bit
+        mask (int): 64bit
+    Returns:
+        ryu.ofproto.ofproto_v1_3_parser.OFPInstructionWriteMedatada
+    """
+    return parser.OFPInstructionWriteMetadata(metadata, mask)
 
 def table_features(body):
     return parser.OFPTableFeaturesStatsRequest(
@@ -300,7 +309,8 @@ def build_match_dict(in_port=None, vlan=None,
                      eth_dst=None, eth_dst_mask=None,
                      ipv6_nd_target=None, icmpv6_type=None,
                      nw_proto=None,
-                     nw_src=None, nw_dst=None):
+                     nw_src=None, nw_dst=None,
+                     metadata=None, metadata_mask=None):
     match_dict = {}
     if in_port is not None:
         match_dict['in_port'] = in_port
@@ -336,6 +346,11 @@ def build_match_dict(in_port=None, vlan=None,
             match_dict['ipv6_dst'] = nw_dst_masked
     if eth_type is not None:
         match_dict['eth_type'] = eth_type
+    if metadata is not None:
+        if metadata_mask:
+            match_dict['metadata'] = (metadata, metadata_mask)
+        else:
+            match_dict['metadata'] = (metadata, (1<<64)-1)
     return match_dict
 
 

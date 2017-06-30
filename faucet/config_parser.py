@@ -91,11 +91,6 @@ def _dp_add_vlan(vid_dp, dp, vlan):
     if vlan.vid not in vid_dp:
         vid_dp[vlan.vid] = set()
 
-    if len(vid_dp[vlan.vid]) > 1:
-        assert not vlan.bgp_routerid, \
-                'DPs %s sharing a BGP speaker VLAN is unsupported' % (
-                    str.join(", ", vid_dp[vlan.vid]))
-
     if vlan not in dp.vlans:
         dp.add_vlan(vlan)
 
@@ -119,12 +114,10 @@ def _dp_parser_v2(logger, acls_conf, dps_conf, routers_conf, vlans_conf):
                 acls.append((acl_ident, ACL(acl_ident, acl_conf)))
             routers = []
             for router_ident, router_conf in list(routers_conf.items()):
-                routers.append((router_ident, Router(router_ident, router_conf)))
-            if routers:
-                assert len(routers) == 1, 'only one router supported'
-                router_ident, router = routers[0]
-                assert set(router.vlans) == set(vlans.keys()), 'only global routing supported'
-                dp.add_router(router_ident, router)
+                routers.append((router_ident, Router(
+                    router_ident, router_conf, dp_id)))
+            for router_ident, router in routers:
+                dp.add_router(router)
             ports_conf = dp_conf.pop('interfaces', {})
             ports = {}
             # as users can config port vlan by using vlan name, we store vid in

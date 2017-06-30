@@ -22,7 +22,7 @@ import logging
 import time
 import os
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import aruba.aruba_pipeline as aruba
 import valve_acl
@@ -95,6 +95,7 @@ class Valve(object):
         # TODO: functional flow managers require too much state.
         # Should interface with a common composer class.
         self.ipv4_route_manager = valve_route.ValveIPv4RouteManager(
+            self.dp,
             self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
             self.dp.max_hosts_per_resolve_cycle, self.dp.max_host_fib_retry_count,
             self.dp.max_resolve_backoff_time, self.dp.proactive_learn,
@@ -105,6 +106,7 @@ class Valve(object):
             self.valve_flowcontroller,
             self.dp.group_table, self.dp.routers)
         self.ipv6_route_manager = valve_route.ValveIPv6RouteManager(
+            self.dp,
             self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
             self.dp.max_hosts_per_resolve_cycle, self.dp.max_host_fib_retry_count,
             self.dp.max_resolve_backoff_time, self.dp.proactive_learn,
@@ -148,10 +150,10 @@ class Valve(object):
                 'ip_proto', 'icmpv6_type', 'arp_tpa', 'ipv4_src'),
             self.dp.ipv4_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'ipv4_src', 'ipv4_dst'),
+                'ipv4_src', 'ipv4_dst', 'metadata', 'metadata_mask'),
             self.dp.ipv6_fib_table: (
                 'vlan_vid', 'eth_type', 'ip_proto',
-                'icmpv6_type', 'ipv6_dst'),
+                'icmpv6_type', 'ipv6_dst', 'metadata', 'metadata_mask'),
             self.dp.eth_dst_table: (
                 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
@@ -251,12 +253,13 @@ class Valve(object):
                        eth_type=None, eth_src=None,
                        eth_dst=None, eth_dst_mask=None,
                        ipv6_nd_target=None, icmpv6_type=None,
-                       nw_proto=None, nw_src=None, nw_dst=None):
+                       nw_proto=None, nw_src=None, nw_dst=None,
+                       metadata=None, metadata_mask=None):
         """Compose an OpenFlow match rule."""
         match_dict = valve_of.build_match_dict(
             in_port, vlan, eth_type, eth_src,
             eth_dst, eth_dst_mask, ipv6_nd_target, icmpv6_type,
-            nw_proto, nw_src, nw_dst)
+            nw_proto, nw_src, nw_dst, metadata, metadata_mask)
         if table_id != self.dp.port_acl_table\
                 and table_id != self.dp.vlan_acl_table:
             assert table_id in self.TABLE_MATCH_TYPES,\
@@ -525,10 +528,8 @@ class Valve(object):
         # add acl rules
         ofmsgs.extend(self._add_vlan_acl(vlan.vid))
         # add controller IPs if configured.
-        for ipv in vlan.ipvs():
-            route_manager = self.route_manager_by_ipv[ipv]
-            ofmsgs.extend(self._add_faucet_vips(
-                route_manager, vlan, vlan.faucet_vips_by_ipv(ipv)))
+        for route_manager in list(self.route_manager_by_ipv.values()):
+            ofmsgs.extend(route_manager.add_router_vips(vlan))
         return ofmsgs
 
     def _del_vlan(self, vlan):
@@ -825,7 +826,8 @@ class Valve(object):
         Returns:
             list: OpenFlow messages, if any.
         """
-        if (pkt_meta.eth_dst == self.FAUCET_MAC or
+        vmacs = [router.vmac for router in list(self.dp.routers.values())]
+        if (pkt_meta.eth_dst in vmacs or
                 not valve_packet.mac_addr_is_unicast(pkt_meta.eth_dst)):
             for handler in (self.ipv4_route_manager.control_plane_handler,
                             self.ipv6_route_manager.control_plane_handler):
@@ -1049,10 +1051,7 @@ class Valve(object):
                 vlan)
             metrics.vlan_hosts_learned.labels(
                 dpid=dpid, vlan=vlan.vid).set(hosts_count)
-            for ipv in vlan.ipvs():
-                neigh_cache_size = len(vlan.neigh_cache_by_ipv(ipv))
-                metrics.vlan_neighbors.labels(
-                    dpid=dpid, vlan=vlan.vid, ipv=ipv).set(neigh_cache_size)
+
             # Repopulate MAC learning.
             hosts_on_port = {}
             for eth_src, host_cache_entry in sorted(list(vlan.host_cache.items())):
@@ -1066,6 +1065,11 @@ class Valve(object):
                     metrics.learned_macs.labels(
                         dpid=dpid, vlan=vlan.vid,
                         port=port_num, n=i).set(mac_int)
+        for route_manager in [self.ipv4_route_manager, self.ipv6_route_manager]:
+            if route_manager:
+                neigh_cache_size = len(route_manager.neighbor_cache)
+                metrics.neighbors.labels(
+                    dpid=dpid, ipv=route_manager.IPV).set(neigh_cache_size)
 
     def rcv_packet(self, dp_id, valves, in_port, vlan_vid, pkt):
         """Handle a packet from the dataplane (eg to re/learn a host).
@@ -1098,7 +1102,6 @@ class Valve(object):
                     pkt_meta.eth_src,
                     pkt_meta.port.number,
                     pkt_meta.vlan.vid))
-
             ofmsgs.extend(self.control_plane_handler(pkt_meta))
 
         if self._rate_limit_packet_ins():
@@ -1290,13 +1293,6 @@ class Valve(object):
                 self._get_config_changes(new_dp))
         else:
             return []
-
-    def _add_faucet_vips(self, route_manager, vlan, faucet_vips):
-        ofmsgs = []
-        for faucet_vip in faucet_vips:
-            assert self.dp.stack is None, 'stacking + routing not yet supported'
-            ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_vip))
-        return ofmsgs
 
     def add_route(self, vlan, ip_gw, ip_dst):
         """Add route to VLAN routing table."""

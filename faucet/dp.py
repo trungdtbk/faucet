@@ -187,8 +187,8 @@ class DP(Conf):
     def add_acl(self, acl_ident, acl):
         self.acls[acl_ident] = acl
 
-    def add_router(self, router_ident, router):
-        self.routers[router_ident] = router
+    def add_router(self, router):
+        self.routers[router.rid] = router
 
     def add_port(self, port):
         port_num = port.number

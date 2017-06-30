@@ -30,41 +30,18 @@ class VLAN(Conf):
     tagged = None
     untagged = None
     vid = None
-    faucet_vips = None
-    bgp_as = None
-    bgp_local_address = None
-    bgp_port = None
-    bgp_routerid = None
-    bgp_neighbor_addresses = []
-    bgp_neighbour_addresses = []
-    bgp_neighbor_as = None
-    bgp_neighbour_as = None
-    routes = None
     max_hosts = None
     unicast_flood = None
     acl_in = None
     # Define dynamic variables with prefix dyn_ to distinguish from variables set
     # configuration
     dyn_host_cache = None
-    dyn_faucet_vips_by_ipv = None
-    dyn_routes_by_ipv = None
-    dyn_neigh_cache_by_ipv = None
 
     defaults = {
         'name': None,
         'description': None,
         'acl_in': None,
-        'faucet_vips': None,
         'unicast_flood': True,
-        'bgp_as': 0,
-        'bgp_local_address': None,
-        'bgp_port': 9179,
-        'bgp_routerid': '',
-        'bgp_neighbour_addresses': [],
-        'bgp_neighbor_addresses': [],
-        'bgp_neighbour_as': 0,
-        'bgp_neighbor_as': None,
-        'routes': None,
         'max_hosts': 255,
         # Limit number of hosts that can be learned on a VLAN.
         'vid': None,
@@ -85,55 +62,12 @@ class VLAN(Conf):
         self.tagged = []
         self.untagged = []
         self.dyn_host_cache = {}
-        self.dyn_faucet_vips_by_ipv = collections.defaultdict(list)
-        self.dyn_routes_by_ipv = collections.defaultdict(dict)
-        self.dyn_neigh_cache_by_ipv = collections.defaultdict(dict)
-        self.dyn_ipvs = []
-
-        if self.faucet_vips:
-            self.faucet_vips = [
-                ipaddress.ip_interface(btos(ip)) for ip in self.faucet_vips]
-            for faucet_vip in self.faucet_vips:
-                self.dyn_faucet_vips_by_ipv[faucet_vip.version].append(
-                    faucet_vip)
-            self.dyn_ipvs = list(self.dyn_faucet_vips_by_ipv.keys())
-
-        if self.bgp_as:
-            assert self.bgp_port
-            assert ipaddress.IPv4Address(btos(self.bgp_routerid))
-            for neighbor_ip in self.bgp_neighbor_addresses:
-                assert ipaddress.ip_address(btos(neighbor_ip))
-            assert self.bgp_neighbor_as
-
-        if self.routes:
-            self.routes = [route['route'] for route in self.routes]
-            for route in self.routes:
-                ip_gw = ipaddress.ip_address(btos(route['ip_gw']))
-                ip_dst = ipaddress.ip_network(btos(route['ip_dst']))
-                assert ip_gw.version == ip_dst.version
-                self.dyn_routes_by_ipv[ip_gw.version][ip_dst] = ip_gw
 
     def add_tagged(self, port):
         self.tagged.append(port)
 
     def add_untagged(self, port):
         self.untagged.append(port)
-
-    def ipvs(self):
-        """Return list of IP versions configured on this VLAN."""
-        return self.dyn_ipvs
-
-    def faucet_vips_by_ipv(self, ipv):
-        """Return list of VIPs with specified IP version on this VLAN."""
-        return self.dyn_faucet_vips_by_ipv[ipv]
-
-    def routes_by_ipv(self, ipv):
-        """Return route table for specified IP version on this VLAN."""
-        return self.dyn_routes_by_ipv[ipv]
-
-    def neigh_cache_by_ipv(self, ipv):
-        """Return neighbor cache for specified IP version on this VLAN."""
-        return self.dyn_neigh_cache_by_ipv[ipv]
 
     @property
     def host_cache(self):
@@ -149,10 +83,6 @@ class VLAN(Conf):
             self._set_default(key, value)
         self._set_default('vid', self._id)
         self._set_default('name', str(self._id))
-        self._set_default('faucet_vips', [])
-        self._set_default('bgp_neighbor_as', self.bgp_neighbour_as)
-        self._set_default(
-            'bgp_neighbor_addresses', self.bgp_neighbour_addresses)
 
     def __str__(self):
         port_list = [str(x) for x in self.get_ports()]
@@ -206,37 +136,3 @@ class VLAN(Conf):
     def port_is_untagged(self, port):
         """Return True if port number is an untagged port on this VLAN."""
         return port in self.untagged
-
-    def is_faucet_vip(self, ipa):
-        """Return True if IP is a VIP on this VLAN."""
-        for faucet_vip in self.faucet_vips_by_ipv(ipa.version):
-            if ipa == faucet_vip.ip:
-                return True
-        return False
-
-    def ip_in_vip_subnet(self, ipa):
-        """Return True if IP in same IP network as a VIP on this VLAN."""
-        for faucet_vip in self.faucet_vips_by_ipv(ipa.version):
-            if ipa in faucet_vip.network:
-                return True
-        return False
-
-    def ips_in_vip_subnet(self, ips):
-        """Return True if all IPs are on same subnet as VIP on this VLAN."""
-        for ipa in ips:
-            if not self.ip_in_vip_subnet(ipa):
-                return False
-        return True
-
-    def from_connected_to_vip(self, src_ip, dst_ip):
-        """Return True if src_ip in connected network and dst_ip is a VIP.
-
-        Args:
-            src_ip (ipaddress.ip_address): source IP.
-            dst_ip (ipaddress.ip_address): destination IP
-        Returns:
-            True if local traffic for a VIP.
-        """
-        if self.is_faucet_vip(dst_ip) and self.ip_in_vip_subnet(src_ip):
-            return True
-        return False
