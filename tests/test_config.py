@@ -42,7 +42,8 @@ class DistConfigTestCase(unittest.TestCase):
         logger.propagate = 0
         logger.setLevel(logging.CRITICAL)
 
-        self.v2_config_hashes, v2_dps = dp_parser('config/testconfigv2.yaml', logname)
+        self.v2_config_hashes, v2_dps = dp_parser(
+                'config/testconfigv2.yaml', logname)
         self.v2_dps_by_id = {}
         for dp in v2_dps:
             self.v2_dps_by_id[dp.dp_id] = dp
@@ -181,27 +182,27 @@ class DistConfigTestCase(unittest.TestCase):
 
     def test_routing(self):
         for dp in (self.v2_dp,):
-            vlan = dp.vlans[41]
+            router = dp.routers[1]
             self.assertIn(
                 ipaddress.ip_interface(u'10.0.0.253/24'),
-                vlan.faucet_vips
+                router.vips()
                 )
-            self.assertEquals(vlan.bgp_port, 9179)
-            self.assertEquals(vlan.bgp_as, 1)
-            self.assertEquals(vlan.bgp_routerid, '1.1.1.1')
-            self.assertIn('127.0.0.1', vlan.bgp_neighbor_addresses)
-            self.assertEquals(vlan.bgp_neighbor_as, 2)
+            self.assertEquals(router.bgp_port, 9179)
+            self.assertEquals(router.bgp_as, 1)
+            self.assertEquals(router.bgp_routerid, '1.1.1.1')
+            self.assertIn('127.0.0.1', router.bgp_neighbor_addresses)
+            self.assertEquals(router.bgp_neighbor_as, 2)
             self.assertIn(
                 ipaddress.ip_network(u'10.0.1.0/24'),
-                vlan.routes_by_ipv(4)
+                router.routes_by_ipv(4)
                 )
             self.assertIn(
                 ipaddress.ip_network(u'10.0.2.0/24'),
-                vlan.routes_by_ipv(4)
+                router.routes_by_ipv(4)
                 )
             self.assertIn(
                 ipaddress.ip_network(u'10.0.3.0/24'),
-                vlan.routes_by_ipv(4)
+                router.routes_by_ipv(4)
                 )
 
     def test_port_acl(self):

@@ -1079,15 +1079,15 @@ dbs:
         controller.cmd('env %s %s' % (exabgp_env, exabgp_cmd))
         return exabgp_log
 
-    def wait_bgp_up(self, neighbor, vlan):
+    def wait_bgp_up(self, neighbor, router_id):
         """Wait for BGP to come up."""
         label_values = {
             'neighbor': neighbor,
-            'vlan': vlan,
+            'router_id': router_id,
         }
         for _ in range(60):
             uptime = self.scrape_prometheus_var(
-                'bgp_neighbor_uptime', label_values, default=0)
+                'bgp_neighbor_uptime', label_values, default=0, dpid=False)
             if uptime > 0:
                 return
             time.sleep(1)
