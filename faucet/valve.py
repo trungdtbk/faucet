@@ -21,7 +21,7 @@ import copy
 import logging
 import time
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 from ryu.lib import mac
 from ryu.ofproto import ether
@@ -73,9 +73,10 @@ def valve_factory(dp):
 class PacketMeta(object):
     """Original, and parsed Ethernet packet metadata."""
 
-    def __init__(self, pkt, eth_pkt, port, vlan, eth_src, eth_dst):
+    def __init__(self, pkt, eth_pkt, dp, port, vlan, eth_src, eth_dst):
         self.pkt = pkt
         self.eth_pkt = eth_pkt
+        self.dp = dp
         self.port = port
         self.vlan = vlan
         self.eth_src = eth_src
@@ -117,7 +118,7 @@ class Valve(object):
                 self.dp.highest_priority,
                 self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
                 self.valve_flowcontroller,
-                self.dp.group_table_routing, self.dp.routers)
+                self.dp.group_table_routing, self.dp.routers, self.dp.dp_id)
             self.route_manager_by_ipv[route_manager.IPV] = route_manager
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.flood_table, self.dp.low_priority,
@@ -955,7 +956,7 @@ class Valve(object):
         eth_dst = eth_pkt.dst
         vlan = self.dp.vlans[vlan_vid]
         port = self.dp.ports[in_port]
-        return PacketMeta(pkt, eth_pkt, port, vlan, eth_src, eth_dst)
+        return PacketMeta(pkt, eth_pkt, self.dp, port, vlan, eth_src, eth_dst)
 
     def _port_learn_ban_rules(self, pkt_meta):
         """Limit learning to a maximum configured on this port.
@@ -1092,14 +1093,14 @@ class Valve(object):
         Return:
             list: OpenFlow messages, if any.
         """
+        dp_ofmsgs = defaultdict(list)
         if not self._known_up_dpid_and_port(dp_id, in_port):
-            return []
+            return dp_ofmsgs
         if not vlan_vid in self.dp.vlans:
             self.dpid_log('Packet_in for unexpected VLAN %s' % (vlan_vid))
-            return []
+            return dp_ofmsgs
 
         pkt_meta = self._parse_rcv_packet(in_port, vlan_vid, pkt)
-        ofmsgs = []
 
         if valve_packet.mac_addr_is_unicast(pkt_meta.eth_src):
             self.dpid_log(
@@ -1108,23 +1109,38 @@ class Valve(object):
                     pkt_meta.port.number,
                     pkt_meta.vlan.vid))
 
-            ofmsgs.extend(self.control_plane_handler(pkt_meta))
+            if not pkt_meta.port.stack:
+                dp_ofmsgs[self.dp.dp_id].extend(self.control_plane_handler(pkt_meta))
+                if self.dp.stack:
+                    for other_dpid, other_valve in list(valves.items()):
+                        if (other_valve.dp.running and
+                                other_valve.dp.stack and
+                                vlan_vid in other_valve.dp.vlans):
+                            pkt_meta_copy = copy.copy(pkt_meta)
+                            pkt_meta_copy.vlan = other_valve.dp.vlans[vlan_vid]
+                            if other_dpid != self.dp.dp_id:
+                                port = other_valve.dp.shortest_path_port(self.dp.name)
+                                if not port:
+                                    continue
+                                pkt_meta_copy.port = port
+                                dp_ofmsgs[other_dpid].extend(
+                                    other_valve.control_plane_handler(pkt_meta_copy))
 
         if self._rate_limit_packet_ins():
-            return ofmsgs
+            return dp_ofmsgs
 
         ban_port_rules = self._port_learn_ban_rules(pkt_meta)
         if ban_port_rules:
-            ofmsgs.extend(ban_port_rules)
-            return ofmsgs
+            dp_ofmsgs[dp_id].extend(ban_port_rules)
+            return dp_ofmsgs
 
         ban_vlan_rules = self._vlan_learn_ban_rules(pkt_meta)
         if ban_vlan_rules:
-            ofmsgs.extend(ban_vlan_rules)
-            return ofmsgs
+            dp_ofmsgs[dp_id].extend(ban_vlan_rules)
+            return dp_ofmsgs
 
-        ofmsgs.extend(self._learn_host(valves, dp_id, pkt_meta))
-        return ofmsgs
+        dp_ofmsgs[dp_id].extend(self._learn_host(valves, dp_id, pkt_meta))
+        return dp_ofmsgs
 
     def host_expire(self):
         """Expire hosts not recently re/learned.
@@ -1311,7 +1327,6 @@ class Valve(object):
     def _add_faucet_vips(self, route_manager, vlan, faucet_vips):
         ofmsgs = []
         for faucet_vip in faucet_vips:
-            assert self.dp.stack is None, 'stacking + routing not yet supported'
             ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_vip))
         return ofmsgs
 

@@ -45,7 +45,9 @@ class AnyVlan(object):
 class NextHop(object):
     """Describes a directly connected (at layer 2) nexthop."""
 
-    def __init__(self, eth_src, now):
+    def __init__(self, dp_id, port_no, eth_src, now):
+        self.dp_id = dp_id
+        self.port_no = port_no
         self.eth_src = eth_src
         self.cache_time = now
         self.last_retry_time = None
@@ -66,7 +68,7 @@ class ValveRouteManager(object):
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
                  route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
-                 valve_flowcontroller, use_group_table, routers):
+                 valve_flowcontroller, use_group_table, routers, dp_id):
         self.logger = logger
         self.faucet_mac = faucet_mac
         self.arp_neighbor_timeout = arp_neighbor_timeout
@@ -91,6 +93,7 @@ class ValveRouteManager(object):
         # as required.
         self.routers = routers
         self.ip_gw_to_group_id = {}
+        self.dp_id = dp_id
 
     def _vlan_vid(self, vlan, port):
         vid = None
@@ -117,7 +120,7 @@ class ValveRouteManager(object):
         return vlan.flood_pkt(
             self._neighbor_resolver_pkt, faucet_vip, ip_gw)
 
-    def _nexthop_actions(self, eth_dst, vlan):
+    def _nexthop_actions(self, dp_id, eth_dst, vlan):
         ofmsgs = []
         if self.routers:
             ofmsgs.append(valve_of.set_vlan_vid(vlan.vid))
@@ -198,7 +201,7 @@ class ValveRouteManager(object):
             vlan, priority, faucet_vip, faucet_vip_host))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated):
+    def _add_resolved_route(self, dp_id, port_no, vlan, ip_gw, ip_dst, eth_dst, is_updated):
         ofmsgs = []
         if self.routers:
             in_match = self._route_match(AnyVlan(), ip_dst)
@@ -206,19 +209,23 @@ class ValveRouteManager(object):
             in_match = self._route_match(vlan, ip_dst)
         if is_updated:
             self.logger.info(
-                'Updating next hop for route %s via %s (%s)',
-                ip_dst, ip_gw, eth_dst)
+                'Updating next hop for route %s via %s (%s) on dp %s',
+                ip_dst, ip_gw, eth_dst, dp_id)
             ofmsgs.extend(self._del_route_flows(vlan, ip_dst))
         else:
             self.logger.info(
-                'Adding new route %s via %s (%s)',
-                ip_dst, ip_gw, eth_dst)
+                'Adding new route %s via %s (%s) on dp %s',
+                ip_dst, ip_gw, eth_dst, dp_id)
         if self.use_group_table:
             inst = [valve_of.apply_actions([valve_of.group_act(
                 group_id=self.ip_gw_to_group_id[ip_gw])])]
         else:
-            inst = [valve_of.apply_actions(self._nexthop_actions(eth_dst, vlan)),
-                    valve_of.goto_table(self.eth_dst_table)]
+            if self.dp_id == dp_id:
+                inst = [valve_of.apply_actions(
+                    self._nexthop_actions(dp_id, eth_dst, vlan))]
+                inst.append(valve_of.goto_table(self.eth_dst_table))
+            else:
+                inst = [valve_of.apply_actions([valve_of.output_port(port_no)])]
         ofmsgs.append(self.valve_flowmod(
             self.fib_table,
             in_match,
@@ -229,14 +236,14 @@ class ValveRouteManager(object):
     def _group_id_from_ip_gw(self, resolved_ip_gw):
         return (hash(str(resolved_ip_gw)) + valve_of.ROUTE_GROUP_OFFSET) & ((1<<32) -1)
 
-    def _update_nexthop_cache(self, vlan, eth_src, ip_gw):
+    def _update_nexthop_cache(self, dp_id, port_no, vlan, eth_src, ip_gw):
         now = time.time()
-        nexthop = NextHop(eth_src, now)
+        nexthop = NextHop(dp_id, port_no, eth_src, now)
         nexthop_cache = self._vlan_nexthop_cache(vlan)
         nexthop_cache[ip_gw] = nexthop
 
-    def _nexthop_group_buckets(self, vlan, port, eth_src):
-        actions = self._nexthop_actions(eth_src, vlan)
+    def _nexthop_group_buckets(self, dp_id, vlan, port, eth_dst):
+        actions = self._nexthop_actions(dp_id, eth_dst, vlan)
         if not vlan.port_is_tagged(port):
             actions.append(valve_of.pop_vlan())
         actions.append(valve_of.output_port(port.number))
@@ -244,10 +251,10 @@ class ValveRouteManager(object):
         return buckets
 
     def _update_nexthop_group(self, is_updated, resolved_ip_gw,
-                              vlan, port, eth_src):
+                              dp_id, vlan, port, eth_src):
         group_mod_method = None
         group_id = None
-        buckets = self._nexthop_group_buckets(vlan, port, eth_src)
+        buckets = self._nexthop_group_buckets(dp_id, vlan, port, eth_src)
         ofmsgs = []
         if is_updated:
             group_mod_method = valve_of.groupmod
@@ -261,10 +268,10 @@ class ValveRouteManager(object):
             group_mod_method(group_id=group_id, buckets=buckets))
         return ofmsgs
 
-    def _update_nexthop(self, vlan, port, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, dp, vlan, port, eth_src, resolved_ip_gw):
         is_updated = False
         routes = self._vlan_routes(vlan)
-        cached_eth_dst = self._cached_nexthop_eth_dst(vlan, resolved_ip_gw)
+        _, _, cached_eth_dst = self._cached_nexthop_eth_dst(vlan, resolved_ip_gw)
         ofmsgs = []
 
         if cached_eth_dst is not None and cached_eth_dst != eth_src:
@@ -274,13 +281,13 @@ class ValveRouteManager(object):
             ofmsgs.extend(
                 self._update_nexthop_group(
                     is_updated, resolved_ip_gw,
-                    vlan, port, eth_src))
+                    dp.dp_id, vlan, port, eth_src))
         for ip_dst, ip_gw in list(routes.items()):
             if ip_gw == resolved_ip_gw:
                 ofmsgs.extend(self._add_resolved_route(
-                    vlan, ip_gw, ip_dst, eth_src, is_updated))
+                    dp.dp_id, port.number, vlan, ip_gw, ip_dst, eth_src, is_updated))
 
-        self._update_nexthop_cache(vlan, eth_src, resolved_ip_gw)
+        self._update_nexthop_cache(dp.dp_id, port.number, vlan, eth_src, resolved_ip_gw)
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -308,7 +315,7 @@ class ValveRouteManager(object):
         """
         for ip_gw, _ in ip_gws:
             if self._vlan_nexthop_cache_entry(vlan, ip_gw) is None:
-                self._update_nexthop_cache(vlan, None, ip_gw)
+                self._update_nexthop_cache(None, None, vlan, None, ip_gw)
 
     def _retry_backoff(self, now, resolve_retries, last_retry_time):
         backoff_seconds = min(
@@ -417,8 +424,10 @@ class ValveRouteManager(object):
         nexthop_cache_entry = self._vlan_nexthop_cache_entry(vlan, ip_gw)
         if (nexthop_cache_entry is not None and
                 nexthop_cache_entry.eth_src is not None):
-            return nexthop_cache_entry.eth_src
-        return None
+            return (nexthop_cache_entry.dp_id,
+                    nexthop_cache_entry.port_no,
+                    nexthop_cache_entry.eth_src)
+        return (None, None, None)
 
     def _host_ip_to_host_int(self, host_ip):
         return ipaddress.ip_interface(ipaddress.ip_network(host_ip))
@@ -481,9 +490,11 @@ class ValveRouteManager(object):
             return ofmsgs
         routes = self._vlan_routes(vlan)
         routes[ip_dst] = ip_gw
-        cached_eth_dst = self._cached_nexthop_eth_dst(vlan, ip_gw)
+        cached_dp_id, port_no, cached_eth_dst = self._cached_nexthop_eth_dst(vlan, ip_gw)
         if cached_eth_dst is not None:
             ofmsgs.extend(self._add_resolved_route(
+                dp_id=cached_dp_id,
+                port_no=port_no,
                 vlan=vlan,
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
@@ -551,6 +562,7 @@ class ValveRouteManager(object):
                 now = time.time()
                 nexthop_fresh = self._nexthop_fresh(pkt_meta.vlan, src_ip, now)
                 self._update_nexthop_cache(
+                    pkt_meta.dp.dp_id, pkt_meta.port.number,
                     pkt_meta.vlan, pkt_meta.eth_src, src_ip)
                 if not nexthop_fresh:
                     if self.use_group_table:
@@ -558,6 +570,7 @@ class ValveRouteManager(object):
                             self._update_nexthop_group(
                                 False,
                                 src_ip,
+                                pkt_meta.dp.dp_id,
                                 pkt_meta.vlan,
                                 pkt_meta.port,
                                 pkt_meta.eth_src))
@@ -663,6 +676,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
     def _control_plane_arp_handler(self, pkt_meta, arp_pkt):
         src_ip = ipaddress.IPv4Address(btos(arp_pkt.src_ip))
         dst_ip = ipaddress.IPv4Address(btos(arp_pkt.dst_ip))
+        rcv_dp = pkt_meta.dp
         vlan = pkt_meta.vlan
         opcode = arp_pkt.opcode
         ofmsgs = []
@@ -673,21 +687,23 @@ class ValveIPv4RouteManager(ValveRouteManager):
                 ofmsgs.extend(
                     self._add_host_fib_route(vlan, src_ip))
                 ofmsgs.extend(self._update_nexthop(
-                    vlan, port, eth_src, src_ip))
-                vid = self._vlan_vid(vlan, port)
-                arp_reply = valve_packet.arp_reply(
-                    vid, self.faucet_mac, eth_src, dst_ip, src_ip)
-                ofmsgs.append(
-                    valve_of.packetout(port.number, arp_reply.data))
-                self.logger.info(
-                    'Responded to ARP request for %s from %s (%s)',
-                    dst_ip, src_ip, eth_src)
+                    rcv_dp, vlan, port, eth_src, src_ip))
+                if rcv_dp.dp_id == self.dp_id:
+                    vid = self._vlan_vid(vlan, port)
+                    arp_reply = valve_packet.arp_reply(
+                        vid, self.faucet_mac, eth_src, dst_ip, src_ip)
+                    ofmsgs.append(
+                        valve_of.packetout(port.number, arp_reply.data))
+                    self.logger.info(
+                        'Responded to ARP request for %s from %s (%s)',
+                        dst_ip, src_ip, eth_src)
             elif (opcode == arp.ARP_REPLY and
                   pkt_meta.eth_dst == self.faucet_mac):
                 ofmsgs.extend(
-                    self._update_nexthop(vlan, port, eth_src, src_ip))
-                self.logger.info(
-                    'ARP response %s (%s)', src_ip, eth_src)
+                    self._update_nexthop(rcv_dp, vlan, port, eth_src, src_ip))
+                if rcv_dp.dp_id == self.dp_id:
+                    self.logger.info(
+                        'ARP response %s (%s)', src_ip, eth_src)
         return ofmsgs
 
     def _control_plane_icmp_handler(self, pkt_meta, ipv4_pkt, icmp_pkt):
@@ -709,13 +725,14 @@ class ValveIPv4RouteManager(ValveRouteManager):
         return ofmsgs
 
     def control_plane_handler(self, pkt_meta):
+        rcv_dp = pkt_meta.dp
         arp_pkt = pkt_meta.pkt.get_protocol(arp.arp)
         if arp_pkt is not None:
             return self._control_plane_arp_handler(pkt_meta, arp_pkt)
         ipv4_pkt = pkt_meta.pkt.get_protocol(ipv4.ipv4)
         if ipv4_pkt is not None:
             icmp_pkt = pkt_meta.pkt.get_protocol(icmp.icmp)
-            if icmp_pkt is not None:
+            if icmp_pkt is not None and rcv_dp.dp_id == self.dp_id:
                 icmp_replies = self._control_plane_icmp_handler(
                     pkt_meta, ipv4_pkt, icmp_pkt)
                 if icmp_replies:
@@ -787,6 +804,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
         return ofmsgs
 
     def _control_plane_icmpv6_handler(self, pkt_meta, ipv6_pkt, icmpv6_pkt):
+        rcv_dp = pkt_meta.dp
         vlan = pkt_meta.vlan
         src_ip = ipaddress.IPv6Address(btos(ipv6_pkt.src))
         dst_ip = ipaddress.IPv6Address(btos(ipv6_pkt.dst))
@@ -802,24 +820,26 @@ class ValveIPv6RouteManager(ValveRouteManager):
                     ofmsgs.extend(
                         self._add_host_fib_route(vlan, src_ip))
                     ofmsgs.extend(self._update_nexthop(
-                        vlan, port, eth_src, src_ip))
-                    nd_reply = valve_packet.nd_advert(
-                        vid, self.faucet_mac, eth_src,
-                        solicited_ip, src_ip, ipv6_pkt.hop_limit)
-                    ofmsgs.append(
-                        valve_of.packetout(port.number, nd_reply.data))
-                    self.logger.info(
-                        'Responded to ND solicit for %s to %s (%s)',
-                        solicited_ip, src_ip, eth_src)
+                        rcv_dp, vlan, port, eth_src, src_ip))
+                    if rcv_dp.dp_id == self.dp_id:
+                        nd_reply = valve_packet.nd_advert(
+                            vid, self.faucet_mac, eth_src,
+                            solicited_ip, src_ip, ipv6_pkt.hop_limit)
+                        ofmsgs.append(
+                            valve_of.packetout(port.number, nd_reply.data))
+                        self.logger.info(
+                            'Responded to ND solicit for %s to %s (%s)',
+                            solicited_ip, src_ip, eth_src)
             elif icmpv6_type == icmpv6.ND_NEIGHBOR_ADVERT:
                 ofmsgs.extend(self._update_nexthop(
-                    vlan, port, eth_src, src_ip))
-                self.logger.info(
-                    'ND advert %s (%s)', src_ip, eth_src)
+                    rcv_dp, vlan, port, eth_src, src_ip))
+                if rcv_dp.dp_id == self.dp_id:
+                    self.logger.info(
+                        'ND advert %s (%s)', src_ip, eth_src)
             elif icmpv6_type == icmpv6.ND_ROUTER_SOLICIT:
                 link_local_vips, other_vips = self._link_and_other_vips(vlan)
                 for vip in link_local_vips:
-                    if src_ip in vip.network:
+                    if src_ip in vip.network and rcv_dp.dp_id == self.dp_id:
                         ra_advert = valve_packet.router_advert(
                             vid, self.faucet_mac, eth_src,
                             vip.ip, src_ip, other_vips)
@@ -831,7 +851,8 @@ class ValveIPv6RouteManager(ValveRouteManager):
                         break
             elif vlan.from_connected_to_vip(src_ip, dst_ip):
                 if (icmpv6_type == icmpv6.ICMPV6_ECHO_REQUEST and
-                        pkt_meta.eth_dst == self.faucet_mac):
+                        pkt_meta.eth_dst == self.faucet_mac and
+                        rcv_dp.dp_id == self.dp_id):
                     icmpv6_echo_reply = valve_packet.icmpv6_echo_reply(
                         vid, self.faucet_mac, eth_src,
                         dst_ip, src_ip, ipv6_pkt.hop_limit,
