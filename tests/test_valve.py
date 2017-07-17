@@ -149,7 +149,7 @@ vlans:
             vlan_vid=vid,
             pkt=pkt
             )
-        self.table.apply_ofmsgs(rcv_packet_ofmsgs)
+        self.table.apply_ofmsgs(rcv_packet_ofmsgs[1])
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
