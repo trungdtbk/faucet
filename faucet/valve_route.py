@@ -71,7 +71,10 @@ class AnyVlan(object):
 class NextHop(object):
     """Describes a directly connected (at layer 2) nexthop."""
 
-    def __init__(self, eth_src, now):
+    def __init__(self, dp_id, port_no, vid, eth_src, now):
+        self.dp_id = dp_id
+        self.port_no = port_no
+        self.vid = vid
         self.eth_src = eth_src
         self.cache_time = now
         self.last_retry_time = None
@@ -258,9 +261,9 @@ class ValveRouteManager(object):
     def _group_id_from_ip_gw(self, resolved_ip_gw):
         return (hash(str(resolved_ip_gw)) + valve_of.ROUTE_GROUP_OFFSET) & ((1<<32) -1)
 
-    def _update_nexthop_cache(self, vlan, eth_src, ip_gw):
+    def _update_nexthop_cache(self, port_no, vlan, eth_src, ip_gw):
         now = time.time()
-        nexthop = NextHop(eth_src, now)
+        nexthop = NextHop(vlan.dp_id, port_no, vlan.vid, eth_src, now)
         nexthop_cache = self._vlan_nexthop_cache(vlan)
         nexthop_cache[ip_gw] = nexthop
 
@@ -309,7 +312,7 @@ class ValveRouteManager(object):
                 ofmsgs.extend(self._add_resolved_route(
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
-        self._update_nexthop_cache(vlan, eth_src, resolved_ip_gw)
+        self._update_nexthop_cache(port.number, vlan, eth_src, resolved_ip_gw)
         self.send_event("Faucet", EventFaucetNHResolved(resolved_ip_gw))
         return ofmsgs
 
@@ -338,7 +341,7 @@ class ValveRouteManager(object):
         """
         for ip_gw, _, _, in ip_gws:
             if self._vlan_nexthop_cache_entry(vlan, ip_gw) is None:
-                self._update_nexthop_cache(vlan, None, ip_gw)
+                self._update_nexthop_cache(None, vlan, None, ip_gw)
 
     def _retry_backoff(self, now, resolve_retries, last_retry_time):
         backoff_seconds = min(
@@ -583,7 +586,7 @@ class ValveRouteManager(object):
                 now = time.time()
                 nexthop_fresh = self._nexthop_fresh(pkt_meta.vlan, src_ip, now)
                 self._update_nexthop_cache(
-                    pkt_meta.vlan, pkt_meta.eth_src, src_ip)
+                    pkt_meta.port.number, pkt_meta.vlan, pkt_meta.eth_src, src_ip)
                 if not nexthop_fresh:
                     if self.use_group_table:
                         ofmsgs.extend(
