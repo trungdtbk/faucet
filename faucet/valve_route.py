@@ -59,7 +59,8 @@ class EventFaucetRouteDel(EventFaucetRouteChange):
 class EventFaucetNHResolved(EventFaucetRouteChange):
     _type = NH_RESOLVE
 
-    def __init__(self, resolved_nexthop):
+    def __init__(self, vid, resolved_nexthop):
+        self.vid = vid
         self.resolved_nexthop = resolved_nexthop
 
 class AnyVlan(object):
@@ -313,7 +314,7 @@ class ValveRouteManager(object):
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
         self._update_nexthop_cache(port.number, vlan, eth_src, resolved_ip_gw)
-        self.send_event("Faucet", EventFaucetNHResolved(resolved_ip_gw))
+        self.send_event("Faucet", EventFaucetNHResolved(vlan.vid, resolved_ip_gw))
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -324,6 +325,7 @@ class ValveRouteManager(object):
         Returns:
             list: tuple, gateway, controller IP in same subnet.
         """
+        #TODO: grab all gws from routers who have vlan as their interface
         routes = self._vlan_routes(vlan)
         ip_gws = []
         for ip_gw in set(routes.values()):
@@ -387,6 +389,7 @@ class ValveRouteManager(object):
         Returns:
             True if a host FIB route (and not used as a gateway).
         """
+        #TODO: RIBs are moved to router, should check this by router
         routes = self._vlan_routes(vlan)
         in_fib = False
         for ip_dst, ip_gw in list(routes.items()):
@@ -510,6 +513,7 @@ class ValveRouteManager(object):
         Returns:
             list: OpenFlow messages.
         """
+        #TODO: Do not add new RIB but this only do flowmods computation
         ofmsgs = []
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
@@ -536,6 +540,7 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        #TODO: Add route to router and fire an EventFaucetRouteAdd Event
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -548,6 +553,7 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        #TODO: Del router from router and fire an EventFaucetRouteDel event
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
@@ -628,6 +634,7 @@ class ValveRouteManager(object):
         Returns:
             list: OpenFlow messages.
         """
+        #TODO: This only generates flowmods for updating DP
         ofmsgs = []
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
@@ -636,6 +643,7 @@ class ValveRouteManager(object):
             del routes[ip_dst]
             ofmsgs.extend(self._del_route_flows(vlan, ip_dst))
             # TODO: need to delete nexthop group if groups are in use.
+        ofmsgs.extend(self._del_route_flows(vlan, ip_dst))
         return ofmsgs
 
     def control_plane_handler(self, pkt_meta):
