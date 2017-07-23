@@ -532,7 +532,7 @@ class Valve(object):
         for ipv in vlan.ipvs():
             route_manager = self.route_manager_by_ipv[ipv]
             ofmsgs.extend(self._add_faucet_vips(
-                route_manager, vlan, vlan.faucet_vips_by_ipv(ipv)))
+                route_manager, vlan, self.FAUCET_MAC, vlan.faucet_vips_by_ipv(ipv)))
         return ofmsgs
 
     def _del_vlan(self, vlan):
@@ -1308,11 +1308,12 @@ class Valve(object):
         self.dpid_log('skipping configuration because datapath not up')
         return (False, [])
 
-    def _add_faucet_vips(self, route_manager, vlan, faucet_vips):
+    def _add_faucet_vips(self, route_manager, vlan, faucet_mac, faucet_vips):
         ofmsgs = []
         for faucet_vip in faucet_vips:
             assert self.dp.stack is None, 'stacking + routing not yet supported'
-            ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_vip))
+            ofmsgs.extend(route_manager.add_faucet_vip(
+                vlan, faucet_mac, faucet_vip))
         return ofmsgs
 
     def add_route(self, vlan, ip_gw, ip_dst):
