@@ -94,9 +94,10 @@ class Valve(object):
     TABLE_MATCH_TYPES = {}
     DEC_TTL = True
 
-    def __init__(self, dp, logname, *args, **kwargs):
+    def __init__(self, dp, logname, send_event, *args, **kwargs):
         self.dp = dp
         self.logger = logging.getLogger(logname + '.valve')
+        self.send_event = send_event
         self.ofchannel_logger = None
         self._packet_in_count_sec = 0
         self._last_packet_in_sec = 0
@@ -117,7 +118,7 @@ class Valve(object):
                 self.dp.highest_priority,
                 self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
                 self.valve_flowcontroller,
-                self.dp.group_table_routing, self.dp.routers)
+                self.dp.group_table_routing, self.dp.routers, self.send_event)
             self.route_manager_by_ipv[route_manager.IPV] = route_manager
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.flood_table, self.dp.low_priority,

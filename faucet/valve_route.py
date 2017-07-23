@@ -25,6 +25,7 @@ from ryu.lib import mac
 from ryu.lib.packet import arp, icmp, icmpv6, ipv4, ipv6
 from ryu.ofproto import ether
 from ryu.ofproto import inet
+from ryu.controller import event
 
 try:
     import valve_of
@@ -35,6 +36,31 @@ except ImportError:
     from faucet import valve_packet
     from faucet.valve_util import btos
 
+ROUTE_ADD = 1
+ROUTE_DEL = 2
+NH_RESOLVE = 3
+
+class EventFaucetRouteChange(event.EventBase):
+    pass
+
+class EventFaucetRouteAdd(EventFaucetRouteChange):
+    _type = ROUTE_ADD
+
+    def __init__(self, prefix, nexthop):
+        self.prefix = prefix
+        self.nexthop = nexthop
+
+class EventFaucetRouteDel(EventFaucetRouteChange):
+    _type = ROUTE_DEL
+
+    def __init__(self, prefix):
+        self.prefix = prefix
+
+class EventFaucetNHResolved(EventFaucetRouteChange):
+    _type = NH_RESOLVE
+
+    def __init__(self, resolved_nexthop):
+        self.resolved_nexthop = resolved_nexthop
 
 class AnyVlan(object):
     """Wildcard VLAN."""
@@ -66,7 +92,7 @@ class ValveRouteManager(object):
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
                  route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
-                 valve_flowcontroller, use_group_table, routers):
+                 valve_flowcontroller, use_group_table, routers, send_event):
         self.logger = logger
         self.faucet_mac = faucet_mac
         self.arp_neighbor_timeout = arp_neighbor_timeout
@@ -90,6 +116,7 @@ class ValveRouteManager(object):
         # all VLANs - we want however to be able to restrict routing
         # as required.
         self.routers = routers
+        self.send_event = send_event
         self.ip_gw_to_group_id = {}
 
     def _vlan_vid(self, vlan, port):
@@ -283,6 +310,7 @@ class ValveRouteManager(object):
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
         self._update_nexthop_cache(vlan, eth_src, resolved_ip_gw)
+        self.send_event("Faucet", EventFaucetNHResolved(resolved_ip_gw))
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):

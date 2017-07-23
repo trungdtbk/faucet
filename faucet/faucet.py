@@ -33,6 +33,8 @@ from ryu.controller import ofp_event
 from ryu.lib import hub
 
 try:
+    from valve_route import EventFaucetRouteChange
+    from valve_route import ROUTE_ADD, ROUTE_DEL, NH_RESOLVE
     from config_parser import dp_parser, get_config_for_api
     from config_parser_util import config_changed
     from valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
@@ -43,6 +45,8 @@ try:
     import valve_packet
     import valve_of
 except ImportError:
+    from faucet.valve_route import EventFaucetRouteChange
+    from faucet.valve_route import ROUTE_ADD, ROUTE_DEL, NH_RESOLVE
     from faucet.config_parser import dp_parser, get_config_for_api
     from faucet.config_parser_util import config_changed
     from faucet.valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
@@ -183,7 +187,7 @@ class Faucet(app_manager.RyuApp):
                 if valve_cl is None:
                     self.logger.fatal('Could not configure %s', new_dp.name)
                 else:
-                    valve = valve_cl(new_dp, self.logname)
+                    valve = valve_cl(new_dp, self.logname, self.send_event)
                     self.valves[dp_id] = valve
                 self.logger.info('Add new datapath %s', dpid_log(dp_id))
             valve.update_config_metrics(self.metrics)
@@ -476,3 +480,13 @@ class Faucet(app_manager.RyuApp):
     def get_tables(self, dp_id):
         """FAUCET API: return config tables for one Valve."""
         return self.valves[dp_id].dp.get_tables()
+
+    @set_ev_cls(EventFaucetRouteChange, MAIN_DISPATCHER)
+    @kill_on_exception(exc_logname)
+    def handle_route_change(self, route_event):
+        if route_event._type == ROUTE_ADD:
+            pass
+        elif route_event._type == ROUTE_DEL:
+            pass
+        elif route_event._type == NH_RESOLVE:
+            pass
