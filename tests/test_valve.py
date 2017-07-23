@@ -115,7 +115,7 @@ vlans:
         self.config_file = os.path.join(self.tmpdir, 'valve_unit.yaml')
         self.table = FakeOFTable(self.NUM_TABLES)
         dp = self.update_config(self.CONFIG)
-        self.valve = valve_factory(dp)(dp, 'test_valve')
+        self.valve = valve_factory(dp)(dp, 'test_valve', None)
 
         # establish connection to datapath
         ofmsgs = self.valve.datapath_connect(
@@ -661,7 +661,7 @@ vlans:
         self.config_file = os.path.join(self.tmpdir, 'valve_reload_unit.yaml')
         self.table = FakeOFTable(self.NUM_TABLES)
         dp = self.update_config(self.OLD_CONFIG)
-        self.valve = valve_factory(dp)(dp, 'test_valve')
+        self.valve = valve_factory(dp)(dp, 'test_valve', None)
 
         # establish connection to datapath
         ofmsgs = self.valve.datapath_connect(
