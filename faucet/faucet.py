@@ -491,9 +491,18 @@ class Faucet(app_manager.RyuApp):
         prefix = route_change.prefix
         nexthop = route_change.nexthop
         cached_entry = route_change.cached_entry
-        if type_ == ROUTE_ADD:
-            pass
-        elif type_ == ROUTE_DEL:
-            pass
-        elif type_ == NH_RESOLVE:
-            pass
+
+        for dp_id, valve in list(self.valves.items()):
+            if dp_id == from_dp.dp_id or vid not in valve.dp.vlans:
+                continue
+            flowmods = []
+            vlan = valve.dp.vlans[vid]
+            if type_ == ROUTE_ADD:
+                flowmods = valve.add_route(vlan, ip_dst=prefix, ip_gw=nexthop)
+            elif type_ == ROUTE_DEL:
+                flowmods = valve.del_route(vlan, ip_dst=prefix)
+            elif type_ == NH_RESOLVE:
+                flowmods = valve.update_nexthop(
+                    from_dp, vlan, cached_entry.eth_src, nexthop)
+            if flowmods:
+                self._send_flow_msgs(dp_id, flowmods)
