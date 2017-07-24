@@ -110,6 +110,7 @@ class Valve(object):
                 (self.dp.ipv4_fib_table, valve_route.ValveIPv4RouteManager),
                 (self.dp.ipv6_fib_table, valve_route.ValveIPv6RouteManager)):
             route_manager = route_manager_class(
+                self.dp.dp_id,
                 self.logger, self.FAUCET_MAC, self.dp.arp_neighbor_timeout,
                 self.dp.max_hosts_per_resolve_cycle, self.dp.max_host_fib_retry_count,
                 self.dp.max_resolve_backoff_time, self.dp.proactive_learn, self.DEC_TTL,
@@ -1333,7 +1334,7 @@ class Valve(object):
         port = self.dp.shortest_path_port(dp.name)
         if port is not None:
             route_manager = self.route_manager_by_ipv[ip_gw.version]
-            ofmsgs = route_manager._update_nexthop(vlan, port, eth_src, ip_gw)
+            ofmsgs = route_manager._update_nexthop(dp.dp_id, vlan, port, eth_src, ip_gw)
 
         return ofmsgs
 
