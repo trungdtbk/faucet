@@ -40,14 +40,20 @@ ROUTE_ADD = 1
 ROUTE_DEL = 2
 NH_RESOLVE = 3
 
-class EventFaucetRouteChange(event.EventBase):
+class RouteChange(object):
 
     def __init__(self, type_, vid=None, prefix=None, nexthop=None, cached_entry=None):
         self._type = type_
+        self.vid = vid
         self.prefix = prefix
         self.nexthop = nexthop
-        self.vid = vid
         self.cached_entry = cached_entry
+
+class EventFaucetRouteChange(event.EventBase):
+
+    def __init__(self, dp_id, msg=None):
+        self.dp_id = dp_id
+        self.msg = msg
 
 class AnyVlan(object):
     """Wildcard VLAN."""
@@ -280,7 +286,7 @@ class ValveRouteManager(object):
             group_mod_method(group_id=group_id, buckets=buckets))
         return ofmsgs
 
-    def _update_nexthop(self, vlan, port, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, vlan, port, eth_src, resolved_ip_gw, broadcast=False):
         is_updated = False
         routes = self._vlan_routes(vlan)
         cached_eth_dst = self._cached_nexthop_eth_dst(vlan, resolved_ip_gw)
@@ -300,11 +306,12 @@ class ValveRouteManager(object):
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
         self._update_nexthop_cache(port.number, vlan, eth_src, resolved_ip_gw)
-        cached_nexthop_entry = self._vlan_nexthop_cache_entry(vlan, resolved_ip_gw)
-        self.send_event(
-                "Faucet",
-                EventFaucetRouteChange(NH_RESOLVE, vid=vlan.vid,
-                    nexthop=resolved_ip_gw, cached_entry=cached_nexthop_entry))
+        if broadcast:
+            cached_nexthop_entry = self._vlan_nexthop_cache_entry(vlan, resolved_ip_gw)
+            route_change = RouteChange(
+                    NH_RESOLVE, vid=vlan.vid, nexthop=resolved_ip_gw,
+                    cached_entry=cached_nexthop_entry)
+            self.send_event("Faucet", EventFaucetRouteChange(vlan.dp_id, route_change))
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -531,9 +538,9 @@ class ValveRouteManager(object):
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
         #TODO: Add route to router and fire an EventFaucetRouteAdd Event
-        self.send_event(
-                "Faucet",
-                EventFaucetRouteChange(ROUTE_ADD, host_route, host_ip))
+        route_change = RouteChange(
+            ROUTE_ADD, vid=vlan.vid, prefix=host_route, nexthop=host_ip)
+        self.send_event("Faucet", EventFaucetRouteChange(vlan.dp_id, route_change))
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -547,9 +554,8 @@ class ValveRouteManager(object):
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
         #TODO: Del router from router and fire an EventFaucetRouteDel event
-        self.send_event(
-                "Faucet",
-                EventFaucetRouteChange(ROUTE_DEL, host_route))
+        route_change = RouteChange(ROUTE_DEL, vid=vlan.vid, prefix=host_route)
+        self.send_event("Faucet", EventFaucetRouteChange(vlan.dpid, route_change))
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
@@ -599,6 +605,12 @@ class ValveRouteManager(object):
                                 pkt_meta.port,
                                 self.faucet_mac,
                                 pkt_meta.eth_src))
+                    vlan = pkt_meta.vlan
+                    cached_entry = self._vlan_nexthop_cache_entry(vlan, src_ip)
+                    route_change = RouteChange(NH_RESOLVE,
+                        vid=vlan.vid, nexthop=src_ip, cached_entry=cached_entry)
+                    self.send_event(
+                        "Faucet", EventFaucetRouteChange(vlan.dp_id, route_change))
                     ofmsgs.extend(
                         self._add_host_fib_route(pkt_meta.vlan, src_ip))
         return ofmsgs
@@ -714,7 +726,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
                 ofmsgs.extend(
                     self._add_host_fib_route(vlan, src_ip))
                 ofmsgs.extend(self._update_nexthop(
-                    vlan, port, eth_src, src_ip))
+                    vlan, port, eth_src, src_ip, True))
                 vid = self._vlan_vid(vlan, port)
                 arp_reply = valve_packet.arp_reply(
                     vid, self.faucet_mac, eth_src, dst_ip, src_ip)
@@ -726,7 +738,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
             elif (opcode == arp.ARP_REPLY and
                   pkt_meta.eth_dst == self.faucet_mac):
                 ofmsgs.extend(
-                    self._update_nexthop(vlan, port, eth_src, src_ip))
+                    self._update_nexthop(vlan, port, eth_src, src_ip, True))
                 self.logger.info(
                     'ARP response %s (%s)', src_ip, eth_src)
         return ofmsgs
@@ -844,7 +856,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
                     ofmsgs.extend(
                         self._add_host_fib_route(vlan, src_ip))
                     ofmsgs.extend(self._update_nexthop(
-                        vlan, port, eth_src, src_ip))
+                        vlan, port, eth_src, src_ip, True))
                     nd_reply = valve_packet.nd_advert(
                         vid, self.faucet_mac, eth_src,
                         solicited_ip, src_ip, ipv6_pkt.hop_limit)
@@ -855,7 +867,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
                         solicited_ip, src_ip, eth_src)
             elif icmpv6_type == icmpv6.ND_NEIGHBOR_ADVERT:
                 ofmsgs.extend(self._update_nexthop(
-                    vlan, port, eth_src, src_ip))
+                    vlan, port, eth_src, src_ip, True))
                 self.logger.info(
                     'ND advert %s (%s)', src_ip, eth_src)
             elif icmpv6_type == icmpv6.ND_ROUTER_SOLICIT:

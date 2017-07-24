@@ -484,9 +484,16 @@ class Faucet(app_manager.RyuApp):
     @set_ev_cls(EventFaucetRouteChange, MAIN_DISPATCHER)
     @kill_on_exception(exc_logname)
     def handle_route_change(self, route_event):
-        if route_event._type == ROUTE_ADD:
+        from_dp = self.valves[route_event.dp_id].dp
+        route_change = route_event.msg
+        type_ = route_change._type
+        vid = route_change.vid
+        prefix = route_change.prefix
+        nexthop = route_change.nexthop
+        cached_entry = route_change.cached_entry
+        if type_ == ROUTE_ADD:
             pass
-        elif route_event._type == ROUTE_DEL:
+        elif type_ == ROUTE_DEL:
             pass
-        elif route_event._type == NH_RESOLVE:
+        elif type_ == NH_RESOLVE:
             pass
