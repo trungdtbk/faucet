@@ -41,27 +41,12 @@ ROUTE_DEL = 2
 NH_RESOLVE = 3
 
 class EventFaucetRouteChange(event.EventBase):
-    pass
 
-class EventFaucetRouteAdd(EventFaucetRouteChange):
-    _type = ROUTE_ADD
-
-    def __init__(self, prefix, nexthop):
+    def __init__(self, type_, vid=None, prefix=None, nexthop=None):
+        self._type = type_
         self.prefix = prefix
         self.nexthop = nexthop
-
-class EventFaucetRouteDel(EventFaucetRouteChange):
-    _type = ROUTE_DEL
-
-    def __init__(self, prefix):
-        self.prefix = prefix
-
-class EventFaucetNHResolved(EventFaucetRouteChange):
-    _type = NH_RESOLVE
-
-    def __init__(self, vid, resolved_nexthop):
         self.vid = vid
-        self.resolved_nexthop = resolved_nexthop
 
 class AnyVlan(object):
     """Wildcard VLAN."""
@@ -314,7 +299,9 @@ class ValveRouteManager(object):
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
         self._update_nexthop_cache(port.number, vlan, eth_src, resolved_ip_gw)
-        self.send_event("Faucet", EventFaucetNHResolved(vlan.vid, resolved_ip_gw))
+        self.send_event(
+                "Faucet",
+                EventFaucetRouteChange(NH_RESOLVE, vlan.vid, resolved_ip_gw))
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -541,6 +528,9 @@ class ValveRouteManager(object):
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
         #TODO: Add route to router and fire an EventFaucetRouteAdd Event
+        self.send_event(
+                "Faucet",
+                EventFaucetRouteChange(ROUTE_ADD, host_route, host_ip))
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -554,6 +544,9 @@ class ValveRouteManager(object):
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
         #TODO: Del router from router and fire an EventFaucetRouteDel event
+        self.send_event(
+                "Faucet",
+                EventFaucetRouteChange(ROUTE_DEL, host_route))
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
