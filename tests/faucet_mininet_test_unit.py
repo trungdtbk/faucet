@@ -2647,7 +2647,7 @@ class FaucetStringOfDPTest(FaucetTest):
     def build_net(self, stack=False, n_dps=1,
                   n_tagged=0, tagged_vid=100,
                   n_untagged=0, untagged_vid=100,
-                  include=[], include_optional=[], acls={}, acl_in_dp={}):
+                  include=[], include_optional=[], acls={}, acl_in_dp={}, vlan_conf={}):
         """Set up Mininet and Faucet for the given topology."""
 
         self.dpids = [str(self.rand_dpid()) for _ in range(n_dps)]
@@ -2665,6 +2665,7 @@ class FaucetStringOfDPTest(FaucetTest):
             include_optional,
             acls,
             acl_in_dp,
+            vlan_conf,
         )
         open(self.faucet_config_path, 'w').write(self.CONFIG)
         self.topo = faucet_mininet_test_topo.FaucetStringOfDPSwitchTopo(
@@ -2678,18 +2679,19 @@ class FaucetStringOfDPTest(FaucetTest):
 
     def get_config(self, dpids=[], stack=False, hardware=None, ofchannel_log=None,
                    n_tagged=0, tagged_vid=0, n_untagged=0, untagged_vid=0,
-                   include=[], include_optional=[], acls={}, acl_in_dp={}):
+                   include=[], include_optional=[], acls={}, acl_in_dp={}, vlan_conf={}):
         """Build a complete Faucet configuration for each datapath, using the given topology."""
 
         def dp_name(i):
             return 'faucet-%i' % (i + 1)
 
-        def add_vlans(n_tagged, tagged_vid, n_untagged, untagged_vid):
+        def add_vlans(n_tagged, tagged_vid, n_untagged, untagged_vid, vlan_conf):
             vlans_config = {}
             if n_untagged:
                 vlans_config[untagged_vid] = {
                     'description': 'untagged',
                 }
+                vlans_config[untagged_vid].update(vlan_conf)
 
             if ((n_tagged and not n_untagged) or
                     (n_tagged and n_untagged and tagged_vid != untagged_vid)):
@@ -2811,7 +2813,7 @@ class FaucetStringOfDPTest(FaucetTest):
             config['include-optional'] = list(include_optional)
 
         config['vlans'] = add_vlans(
-            n_tagged, tagged_vid, n_untagged, untagged_vid)
+            n_tagged, tagged_vid, n_untagged, untagged_vid, vlan_conf)
 
         config['acls'] = acls.copy()
 
@@ -3297,3 +3299,97 @@ acls:
         source_host, overridden_host, rewrite_host = self.net.hosts[0:3]
         self.verify_dest_rewrite(
             source_host, overridden_host, rewrite_host, overridden_host)
+
+class FaucetStringOfDPIPv4RouteTest(FaucetStringOfDPTest):
+    NUM_DPS = 3
+    NUM_HOSTS = 1
+
+    VLAN_CONFIG = {
+        'faucet_vips': ['10.0.0.254/24'],
+        'routes': [
+            {'route': {'ip_dst': '11.0.0.0/24', 'ip_gw': '10.0.0.1'}},
+            {'route': {'ip_dst': '12.0.0.0/24', 'ip_gw': '10.0.0.2'}},
+            {'route': {'ip_dst': '13.0.0.0/24', 'ip_gw': '10.0.0.3'}}]
+        }
+
+    def setUp(self):
+        super(FaucetStringOfDPIPv4RouteTest, self).setUp()
+        self.build_net(
+            stack=True,
+            n_dps=self.NUM_DPS, n_untagged=self.NUM_HOSTS, untagged_vid=self.VID,
+            vlan_conf=self.VLAN_CONFIG)
+        self.start_net()
+
+    def verify_ipv4_routing(self):
+        all_routed_ips = [
+            ipaddress.ip_interface(u'11.0.0.1/24'),
+            ipaddress.ip_interface(u'12.0.0.1/24'),
+            ipaddress.ip_interface(u'13.0.0.1/24')]
+        zipall = zip(self.net.hosts, all_routed_ips, self.dpids)
+        for host, routed_ip, dpid in zipall:
+            self.host_ipv4_alias(host, routed_ip)
+            for other_routed_ip in all_routed_ips:
+                self.add_host_route(host, other_routed_ip, self.FAUCET_VIPV4.ip)
+            self.dpid = dpid
+            self.wait_for_route_as_flow(
+                host.MAC(), routed_ip.network, with_group_table=False)
+        self.eventually_all_reachable()
+        for host in self.net.hosts:
+            for routed_ip in all_routed_ips:
+                self.one_ipv4_ping(host, routed_ip.ip)
+
+    def test_untagged(self):
+        self.verify_ipv4_routing()
+
+class FaucetStringOfDPIPv6RouteTest(FaucetStringOfDPTest):
+    NUM_DPS = 3
+    NUM_HOSTS = 1
+
+    VLAN_CONFIG = {
+        'faucet_vips': ['fc00::1:254/112'],
+        'routes': [
+            {'route': {'ip_dst': 'fc00:1::/112', 'ip_gw': 'fc00::1:1'}},
+            {'route': {'ip_dst': 'fc00:2::/112', 'ip_gw': 'fc00::1:2'}},
+            {'route': {'ip_dst': 'fc00:3::/112', 'ip_gw': 'fc00::1:3'}}]
+        }
+
+    def setUp(self):
+        super(FaucetStringOfDPIPv6RouteTest, self).setUp()
+        self.build_net(
+            stack=True,
+            n_dps=self.NUM_DPS, n_untagged=self.NUM_HOSTS, untagged_vid=self.VID,
+            vlan_conf=self.VLAN_CONFIG)
+        self.start_net()
+
+    def host_disable_dad(self, host):
+        self.assertRegexpMatches(
+            host.cmd('sysctl net.ipv6.conf.%s.accept_dad=0' % host.intf()),
+            'accept_dad')
+
+    def verify_ipv6_routing(self):
+        all_host_ips = [
+            ipaddress.ip_interface(u'fc00::1:1/112'),
+            ipaddress.ip_interface(u'fc00::1:2/112'),
+            ipaddress.ip_interface(u'fc00::1:3/112')]
+        all_routed_ips = [
+            ipaddress.ip_interface(u'fc00:1::1/112'),
+            ipaddress.ip_interface(u'fc00:2::2/112'),
+            ipaddress.ip_interface(u'fc00:3::3/112')]
+        zipall = zip(self.net.hosts, all_host_ips, all_routed_ips, self.dpids)
+        for host, host_ip, routed_ip, dpid in zipall:
+            self.host_disable_dad(host)
+            self.add_host_ipv6_address(host, host_ip)
+            self.add_host_ipv6_address(host, routed_ip)
+            self.one_ipv6_controller_ping(host)
+            for other_routed_ip in all_routed_ips:
+                self.add_host_route(host, other_routed_ip, self.FAUCET_VIPV6.ip)
+            self.dpid = dpid
+            self.wait_for_route_as_flow(
+                host.MAC(), routed_ip.network, with_group_table=False)
+        self.eventually_all_reachable()
+        for host in self.net.hosts:
+            for routed_ip in all_routed_ips:
+                self.one_ipv6_ping(host, routed_ip.ip)
+
+    def test_untagged(self):
+        self.verify_ipv6_routing()
