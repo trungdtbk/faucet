@@ -42,11 +42,12 @@ NH_RESOLVE = 3
 
 class EventFaucetRouteChange(event.EventBase):
 
-    def __init__(self, type_, vid=None, prefix=None, nexthop=None):
+    def __init__(self, type_, vid=None, prefix=None, nexthop=None, cached_entry=None):
         self._type = type_
         self.prefix = prefix
         self.nexthop = nexthop
         self.vid = vid
+        self.cached_entry = cached_entry
 
 class AnyVlan(object):
     """Wildcard VLAN."""
@@ -299,9 +300,11 @@ class ValveRouteManager(object):
                     vlan, ip_gw, ip_dst, self.faucet_mac, eth_src, is_updated))
 
         self._update_nexthop_cache(port.number, vlan, eth_src, resolved_ip_gw)
+        cached_nexthop_entry = self._vlan_nexthop_cache_entry(vlan, resolved_ip_gw)
         self.send_event(
                 "Faucet",
-                EventFaucetRouteChange(NH_RESOLVE, vlan.vid, resolved_ip_gw))
+                EventFaucetRouteChange(NH_RESOLVE, vid=vlan.vid,
+                    nexthop=resolved_ip_gw, cached_entry=cached_nexthop_entry))
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
