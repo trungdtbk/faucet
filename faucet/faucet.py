@@ -504,5 +504,5 @@ class Faucet(app_manager.RyuApp):
             elif type_ == NH_RESOLVE:
                 flowmods = valve.update_nexthop(
                     from_dp, vlan, cached_entry.eth_src, nexthop)
-            if flowmods:
+            if flowmods and valve.dp.running:
                 self._send_flow_msgs(dp_id, flowmods)
