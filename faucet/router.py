@@ -16,23 +16,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ipaddress
+import collections
+
 try:
     from conf import Conf
+    from valve_util import btos
 except ImportError:
     from faucet.conf import Conf
+    from faucet.valve_util import btos
 
 
-class Router(Conf):
-    """Implement FAUCET configuration for a router."""
+class Interface(Conf):
 
-    vlans = None
+    ipv4 = None
+    ipv6 = None
 
     defaults = {
-        'vlans': None,
+        'ipv4': None,
+        'ipv6': None,
     }
 
     defaults_type = {
-        'vlans': list,
+        'ipv4': str,
+        'ipv6': str,
     }
 
     def __init__(self, _id, conf=None):
@@ -40,3 +47,38 @@ class Router(Conf):
             conf = {}
         self.update(conf)
         self._id = _id
+        self.vip_by_ipv = {}
+        for vip in (self.ipv4, self.ipv6):
+            if vip:
+                vip = ipaddress.ip_interface(btos(self.ipv4))
+                self.vip_by_ipv[vip.version] = vip
+
+class Router(Conf):
+    """Implement FAUCET configuration for a router."""
+
+    vlans = None
+    router_id = None
+    default = None
+
+    defaults = {
+        'vlans': None,
+        'router_id': None,
+        'default' : False,
+    }
+
+    defaults_type = {
+        'vlans': dict,
+        'router_id': int,
+        'default': bool,
+    }
+
+    def __init__(self, _id, conf=None):
+        if conf is None:
+            conf = {}
+        self.update(conf)
+        self._id = _id
+        self._set_default('router_id', self._id)
+        self.interfaces = {}
+        if self.vlans:
+            for vid, int_conf in list(self.vlans.items()):
+                self.interfaces[vid] = Interface(vid, int_conf)

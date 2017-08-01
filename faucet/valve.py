@@ -256,12 +256,13 @@ class Valve(object):
                        eth_type=None, eth_src=None,
                        eth_dst=None, eth_dst_mask=None,
                        ipv6_nd_target=None, icmpv6_type=None,
-                       nw_proto=None, nw_src=None, nw_dst=None):
+                       nw_proto=None, nw_src=None, nw_dst=None,
+                       metatada=None, metadata_mask=None):
         """Compose an OpenFlow match rule."""
         match_dict = valve_of.build_match_dict(
             in_port, vlan, eth_type, eth_src,
             eth_dst, eth_dst_mask, ipv6_nd_target, icmpv6_type,
-            nw_proto, nw_src, nw_dst)
+            nw_proto, nw_src, nw_dst, metatada, metadata_mask)
         if (table_id not in (
             self.dp.port_acl_table, self.dp.vlan_acl_table, ofp.OFPTT_ALL)):
             assert table_id in self.TABLE_MATCH_TYPES,\

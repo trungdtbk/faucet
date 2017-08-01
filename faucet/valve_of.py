@@ -250,6 +250,10 @@ def output_controller(max_len=96):
     return output_port(ofp.OFPP_CONTROLLER, max_len)
 
 
+def write_metadata(metadata, metadata_mask):
+    return parser.OFPInstructionWriteMetadata(metadata, metadata_mask)
+
+
 def packetout(port_num, data):
     """Return OpenFlow action to packet out to dataplane from controller.
 
@@ -310,7 +314,8 @@ def build_match_dict(in_port=None, vlan=None,
                      eth_dst=None, eth_dst_mask=None,
                      ipv6_nd_target=None, icmpv6_type=None,
                      nw_proto=None,
-                     nw_src=None, nw_dst=None):
+                     nw_src=None, nw_dst=None,
+                     metadata=None, metadata_mask=None):
     match_dict = {}
     if in_port is not None:
         match_dict['in_port'] = in_port
@@ -346,6 +351,11 @@ def build_match_dict(in_port=None, vlan=None,
             match_dict['ipv6_dst'] = nw_dst_masked
     if eth_type is not None:
         match_dict['eth_type'] = eth_type
+    if metadata is not None:
+        if metadata_mask is None:
+            metadata_mask = (1<<64) - 1
+        match_dict['metadata'] = (metadata, metadata_mask)
+
     return match_dict
 
 
