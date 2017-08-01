@@ -53,6 +53,17 @@ class Interface(Conf):
                 vip = ipaddress.ip_interface(btos(self.ipv4))
                 self.vip_by_ipv[vip.version] = vip
 
+    def ip_is_vip(self, ipa):
+        if ipa.version in self.vip_by_ipv and self.vip_by_ipv[ipa.version] == ipa:
+            return True
+        return False
+
+    def ip_in_vip_subnet(self, ipa):
+        if (ipa.version in self.vip_by_ipv and
+            ipa in self.vip_by_ipv[ipa.version].network):
+            return True
+        return False
+
 class Router(Conf):
     """Implement FAUCET configuration for a router."""
 
@@ -82,3 +93,26 @@ class Router(Conf):
         if self.vlans:
             for vid, int_conf in list(self.vlans.items()):
                 self.interfaces[vid] = Interface(vid, int_conf)
+        self.faucet_mac = self._router_id_to_mac()
+
+    def _router_id_to_mac(self):
+       m1 = (self.router_id & 0xFF000000)>>24
+       m1 = (self.router_id & 0x00FF0000)>>16
+       m3 = (self.router_id & 0x0000FF00)>>8
+       m4 = (self.router_id & 0x000000FF)>>0
+       return '0e:00:{:02x}:{:02x}:{:02x}:{:02x}'.format(*[m1, m2, m3, m4])
+
+    def ip_is_vip(self, vid, ipa):
+        if vid in self.interfaces:
+            intf = self.interfaces[vid]
+            return intf.ip_is_vip(ipa)
+        return False
+
+    def ip_in_vip_subnet(self, vid, ipa):
+        if vid in self.interfaces:
+            intf = self.interfaces[vid]
+            return intf.ip_in_vip_subnet(ipa)
+        return False
+
+    def is_default(self):
+        return self.default
