@@ -88,7 +88,7 @@ class Router(Conf):
     routes = None
 
     defaults = {
-        'vlans': None,
+        'vlans': {},
         'router_id': None,
         'default' : False,
         'bgp_as': None,
