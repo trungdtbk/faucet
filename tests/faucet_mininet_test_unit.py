@@ -1082,7 +1082,13 @@ class FaucetUntaggedBGPIPv4DefaultRouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
@@ -1134,10 +1140,10 @@ group test {
         first_host_alias_host_ip = ipaddress.ip_interface(
             ipaddress.ip_network(first_host_alias_ip.ip))
         self.host_ipv4_alias(first_host, first_host_alias_ip)
-        self.wait_bgp_up('127.0.0.1', 100)
+        self.wait_bgp_up('127.0.0.1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '4', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '4', 'router': '1'}),
             0)
         self.wait_exabgp_sent_updates(self.exabgp_log)
         self.add_host_route(
@@ -1153,7 +1159,11 @@ class FaucetUntaggedBGPIPv4RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    1:
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
@@ -1212,10 +1222,10 @@ group test {
         # wait until 10.0.0.1 has been resolved
         self.wait_for_route_as_flow(
             first_host.MAC(), ipaddress.IPv4Network(u'10.99.99.0/24'))
-        self.wait_bgp_up('127.0.0.1', 100)
+        self.wait_bgp_up('127.0.0.1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '4', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '4', 'router': '1'}),
             0)
         self.wait_exabgp_sent_updates(self.exabgp_log)
         self.verify_invalid_bgp_route('10.0.0.4/24 cannot be us')
@@ -1236,12 +1246,18 @@ class FaucetUntaggedIPv4RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
         bgp_neighbor_addresses: ["127.0.0.1"]
         bgp_neighbor_as: 2
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
         routes:
             - route:
                 ip_dst: "10.0.1.0/24"
@@ -1299,10 +1315,10 @@ group test {
         self.verify_ipv4_routing_mesh()
         self.flap_all_switch_ports()
         self.verify_ipv4_routing_mesh()
-        self.wait_bgp_up('127.0.0.1', 100)
+        self.wait_bgp_up('127.0.0.1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '4', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '4', 'router': '1'}, dpid=False),
             0)
         # exabgp should have received our BGP updates
         updates = self.exabgp_updates(self.exabgp_log)
@@ -2307,7 +2323,13 @@ class FaucetTaggedIPv4RouteTest(FaucetTaggedTest):
 vlans:
     100:
         description: "tagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
         routes:
             - route:
                 ip_dst: "10.0.1.0/24"
@@ -2356,7 +2378,11 @@ class FaucetTaggedProactiveNeighborIPv4RouteTest(FaucetTaggedTest):
 vlans:
     100:
         description: "tagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    1:
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
 """
 
     CONFIG = """
@@ -2389,7 +2415,7 @@ vlans:
         self.one_ipv4_ping(second_host, first_host_alias_ip.ip)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'vlan_neighbors', {'ipv': '4', 'vlan': '100'}),
+                'neighbors', {'ipv': '4', 'router': '1'}, dpid=False),
             1)
 
 
@@ -2399,7 +2425,13 @@ class FaucetTaggedProactiveNeighborIPv6RouteTest(FaucetTaggedTest):
 vlans:
     100:
         description: "tagged"
-        faucet_vips: ["fc00::1:3/64"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::1:3/64"
 """
 
     CONFIG = """
@@ -2437,7 +2469,7 @@ vlans:
         self.one_ipv6_ping(second_host, first_host_alias_ip.ip)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'vlan_neighbors', {'ipv': '6', 'vlan': '100'}),
+                'neighbors', {'ipv': '6', 'router': '1'}, dpid=False),
             1)
 
 
@@ -2449,14 +2481,18 @@ class FaucetUntaggedIPv4InterVLANRouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "100"
-        faucet_vips: ["10.100.0.254/24"]
     200:
         description: "200"
-        faucet_vips: ["10.200.0.254/24"]
         faucet_mac: "%s"
 routers:
     router-1:
-        vlans: [100, 200]
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv4: "10.100.0.254/24"
+            200:
+                ipv4: "10.200.0.254/24"
 """ % FAUCET_MAC2
 
     CONFIG = """
@@ -2503,7 +2539,18 @@ class FaucetUntaggedMixedIPv4RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["172.16.0.254/24", "10.0.0.254/24"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv4: "172.16.0.254/24"
+    router-2:
+        router_id: 2
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
 """
 
     CONFIG = """
@@ -2590,7 +2637,13 @@ class FaucetUntaggedBGPIPv6DefaultRouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["fc00::1:254/112"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::1:254/112"
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
@@ -2644,10 +2697,10 @@ group test {
         first_host_alias_host_ip = ipaddress.ip_interface(
             ipaddress.ip_network(first_host_alias_ip.ip))
         self.add_host_ipv6_address(first_host, first_host_alias_ip)
-        self.wait_bgp_up('::1', 100)
+        self.wait_bgp_up('::1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '6', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '6', 'router': '1'}, dpid=False),
             0)
         self.wait_exabgp_sent_updates(self.exabgp_log)
         self.add_host_route(
@@ -2662,7 +2715,13 @@ class FaucetUntaggedBGPIPv6RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["fc00::1:254/112"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::1:254/112"
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
@@ -2713,10 +2772,10 @@ group test {
 
     def test_untagged(self):
         first_host, second_host = self.net.hosts[:2]
-        self.wait_bgp_up('::1', 100)
+        self.wait_bgp_up('::1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '6', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '6', 'router': '1'}, dpid=False),
             0)
         self.wait_exabgp_sent_updates(self.exabgp_log)
         self.verify_invalid_bgp_route('fc00::40:1/112 cannot be us')
@@ -2734,14 +2793,27 @@ class FaucetUntaggedSameVlanIPv6RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["fc00::10:1/112", "fc00::20:1/112"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::10:1/112"
         routes:
             - route:
                 ip_dst: "fc00::10:0/112"
                 ip_gw: "fc00::10:2"
+    router-2:
+        router_id: 2
+        vlans:
+            100
+                ipv6: "fc00::20:1/112"
+        routes:
             - route:
                 ip_dst: "fc00::20:0/112"
                 ip_gw: "fc00::20:2"
+
 """
 
     CONFIG = """
@@ -2790,7 +2862,13 @@ class FaucetUntaggedIPv6RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["fc00::1:254/112"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::1:254/112"
         bgp_port: %(bgp_port)d
         bgp_as: 1
         bgp_routerid: "1.1.1.1"
@@ -2855,10 +2933,10 @@ group test {
         self.wait_for_route_as_flow(
             second_host.MAC(), ipaddress.IPv6Network(u'fc00::30:0/112'))
         self.verify_ipv6_routing_mesh()
-        self.wait_bgp_up('::1', 100)
+        self.wait_bgp_up('::1', 1)
         self.assertGreater(
             self.scrape_prometheus_var(
-                'bgp_neighbor_routes', {'ipv': '6', 'vlan': '100'}),
+                'bgp_neighbor_routes', {'ipv': '6', 'router': '1'}, dpid=False),
             0)
         updates = self.exabgp_updates(self.exabgp_log)
         assert re.search('fc00::1:0/112 next-hop fc00::1:254', updates)
@@ -2874,7 +2952,13 @@ class FaucetTaggedIPv6RouteTest(FaucetTaggedTest):
 vlans:
     100:
         description: "tagged"
-        faucet_vips: ["fc00::1:254/112"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv6: "fc00::1:254/112"
         routes:
             - route:
                 ip_dst: "fc00::10:0/112"
@@ -3354,7 +3438,13 @@ class FaucetGroupTableUntaggedIPv4RouteTest(FaucetUntaggedTest):
 vlans:
     100:
         description: "untagged"
-        faucet_vips: ["10.0.0.254/24"]
+routers:
+    router-1:
+        router_id: 1
+        default: true
+        vlans:
+            100:
+                ipv4: "10.0.0.254/24"
         routes:
             - route:
                 ip_dst: "10.0.1.0/24"
