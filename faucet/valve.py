@@ -21,7 +21,7 @@ import copy
 import logging
 import time
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 from ryu.lib import mac
 from ryu.ofproto import ether
@@ -73,11 +73,12 @@ def valve_factory(dp):
 class PacketMeta(object):
     """Original, and parsed Ethernet packet metadata."""
 
-    def __init__(self, pkt, eth_pkt, port, vlan, eth_src, eth_dst):
+    def __init__(self, pkt, eth_pkt, port, router, vlan, eth_src, eth_dst):
         self.pkt = pkt
         self.eth_pkt = eth_pkt
         self.port = port
         self.vlan = vlan
+        self.router = router
         self.eth_src = eth_src
         self.eth_dst = eth_dst
 
@@ -530,10 +531,16 @@ class Valve(object):
         # add acl rules
         ofmsgs.extend(self._add_vlan_acl(vlan.vid))
         # add controller IPs if configured.
-        for ipv in vlan.ipvs():
+        faucet_vips_by_ipv = defaultdict(list)
+        for router in list(self.dp.routers.values()):
+            for ipv in router.ipvs():
+                vip = router.vip_by_ipv(vlan.vid, ipv)
+                if vip is not None:
+                    faucet_vips_by_ipv[ipv].append((router.faucet_mac, vip))
+        for ipv in list(faucet_vips_by_ipv.keys()):
             route_manager = self.route_manager_by_ipv[ipv]
             ofmsgs.extend(self._add_faucet_vips(
-                route_manager, vlan, vlan.faucet_vips_by_ipv(ipv)))
+                route_manager, vlan, faucet_vips_by_ipv[ipv]))
         return ofmsgs
 
     def _del_vlan(self, vlan):
@@ -592,11 +599,18 @@ class Valve(object):
         """Called periodically to advertise services (eg. IPv6 RAs)."""
         ofmsgs = []
         now = time.time()
+        router = None
+        for router_ in list(self.dp.routers.values()):
+            if router_.is_default():
+                router = router_
+                break
+        if router is None:
+            return ofmsgs
         if (self.dp.advertise_interval and
                 now - self._last_advertise_sec > self.dp.advertise_interval):
             for vlan in list(self.dp.vlans.values()):
                 for route_manager in list(self.route_manager_by_ipv.values()):
-                    ofmsgs.extend(route_manager.advertise(vlan))
+                    ofmsgs.extend(route_manager.advertise(router, vlan))
             self._last_advertise_sec = now
         return ofmsgs
 
@@ -841,8 +855,9 @@ class Valve(object):
         Returns:
             list: OpenFlow messages, if any.
         """
-        if (pkt_meta.eth_dst == pkt_meta.vlan.faucet_mac or
-                not valve_packet.mac_addr_is_unicast(pkt_meta.eth_dst)):
+        if (pkt_meta.router is not None and
+                (pkt_meta.eth_dst == pkt_meta.router.faucet_mac or
+                not valve_packet.mac_addr_is_unicast(pkt_meta.eth_dst))):
             for route_manager in list(self.route_manager_by_ipv.values()):
                 ofmsgs = route_manager.control_plane_handler(pkt_meta)
                 if ofmsgs:
@@ -956,7 +971,14 @@ class Valve(object):
         eth_dst = eth_pkt.dst
         vlan = self.dp.vlans[vlan_vid]
         port = self.dp.ports[in_port]
-        return PacketMeta(pkt, eth_pkt, port, vlan, eth_src, eth_dst)
+        router = None
+        for router_ in list(self.dp.routers.values()):
+            if eth_dst == router_.faucet_mac and vlan_vid in router_.interfaces:
+                router = router_
+                break
+            elif router_.is_default() and vlan_vid in router_.interfaces:
+                router = router_
+        return PacketMeta(pkt, eth_pkt, port, router, vlan, eth_src, eth_dst)
 
     def _port_learn_ban_rules(self, pkt_meta):
         """Limit learning to a maximum configured on this port.
@@ -1042,15 +1064,17 @@ class Valve(object):
                     dpid=label_dict['dpid'], vlan=label_dict['vlan'],
                     port=label_dict['port'], n=label_dict['n']).set(0)
 
+        for router in list(self.dp.routers.values()):
+            for ipv in router.ipvs():
+                neigh_cache_size = len(router.neigh_cache_by_ipv(ipv))
+                metrics.router_neighbors.labels(
+                    dpid=dpid, router=router.router_id, ipv=ipv).set(neigh_cache_size)
+
         for vlan in list(self.dp.vlans.values()):
             hosts_count = self.host_manager.hosts_learned_on_vlan_count(
                 vlan)
             metrics.vlan_hosts_learned.labels(
                 dpid=dpid, vlan=vlan.vid).set(hosts_count)
-            for ipv in vlan.ipvs():
-                neigh_cache_size = len(vlan.neigh_cache_by_ipv(ipv))
-                metrics.vlan_neighbors.labels(
-                    dpid=dpid, vlan=vlan.vid, ipv=ipv).set(neigh_cache_size)
             # Repopulate MAC learning.
             hosts_on_port = {}
             for eth_src, host_cache_entry in sorted(list(vlan.host_cache.items())):
@@ -1299,20 +1323,20 @@ class Valve(object):
 
     def _add_faucet_vips(self, route_manager, vlan, faucet_vips):
         ofmsgs = []
-        for faucet_vip in faucet_vips:
+        for faucet_mac, faucet_vip in faucet_vips:
             assert self.dp.stack is None, 'stacking + routing not yet supported'
-            ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_vip))
+            ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_mac, faucet_vip))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, router, ip_gw, ip_dst):
         """Add route to VLAN routing table."""
         route_manager = self.route_manager_by_ipv[ip_dst.version]
-        return route_manager.add_route(vlan, ip_gw, ip_dst)
+        return route_manager.add_route(router, ip_gw, ip_dst)
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, router, ip_dst):
         """Delete route from VLAN routing table."""
         route_manager = self.route_manager_by_ipv[ip_dst.version]
-        return route_manager.del_route(vlan, ip_dst)
+        return route_manager.del_route(router, ip_dst)
 
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.
@@ -1324,9 +1348,12 @@ class Valve(object):
             return []
         ofmsgs = []
         now = time.time()
-        for vlan in list(self.dp.vlans.values()):
-            for route_manager in list(self.route_manager_by_ipv.values()):
-                ofmsgs.extend(route_manager.resolve_gateways(vlan, now))
+        for router in list(self.dp.routers.values()):
+            for vlan in list(self.dp.vlans.values()):
+                if vlan.vid not in router.interfaces:
+                    continue
+                for route_manager in list(self.route_manager_by_ipv.values()):
+                    ofmsgs.extend(route_manager.resolve_gateways(router, vlan, now))
         return ofmsgs
 
     def get_config_dict(self):

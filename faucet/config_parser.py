@@ -134,7 +134,7 @@ def _dp_parser_v2(logger, acls_conf, dps_conf, meters_conf,
                 acls.append((acl_ident, ACL(acl_ident, acl_conf)))
             for router_ident, router_conf in list(routers_conf.items()):
                 router = Router(router_ident, router_conf)
-                dp.add_router(router_ident, router)
+                dp.add_router(router.router_id, router)
             meters = []
             for meter_ident, meter_conf in list(meters_conf.items()):
                 meters.append((meter_ident, Meter(meter_ident, meter_conf)))
