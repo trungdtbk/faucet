@@ -93,6 +93,7 @@ class DP(Conf):
         'ipv4_fib_table': None,
         'ipv6_fib_table': None,
         'vip_table': None,
+        'mpls_table': None,
         'eth_dst_table': None,
         'flood_table': None,
         # How much to offset default priority by
@@ -215,6 +216,8 @@ class DP(Conf):
         self.port_acl_in = {}
         self.vlan_acl_in = {}
 
+        self.label_id = self._get_label_id()
+
     def sanity_check(self):
         # TODO: this shouldnt use asserts
         assert 'dp_id' in self.__dict__
@@ -247,10 +250,14 @@ class DP(Conf):
                 'ipv4_fib_table',
                 'ipv6_fib_table',
                 'vip_table',
+                'mpls_table',
                 'eth_dst_table',
                 'flood_table'):
             self._set_default(table_name, table_id)
             table_id += 1 # pytype: disable=none-attr
+
+    def _get_label_id(self):
+        return hash(self._id) - ((1<<20) - 1)
 
     def add_acl(self, acl_ident, acl):
         self.acls[acl_ident] = acl
