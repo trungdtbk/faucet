@@ -189,6 +189,8 @@ class Valve(object):
                 'vlan_vid', 'eth_type', 'ipv6_dst'),
             self.dp.vip_table: (
                 'eth_type', 'eth_dst', 'ip_proto', 'arp_tpa'),
+            self.dp.mpls_table: (
+                'mpls_label', 'mpls_tc', 'mpls_bos'),
             self.dp.eth_dst_table: (
                 'in_port', 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
