@@ -216,7 +216,7 @@ class DP(Conf):
         self.port_acl_in = {}
         self.vlan_acl_in = {}
 
-        self.label_id = self._get_label_id()
+        self.label_id = self.get_mpls_label(self.name)
 
     def sanity_check(self):
         # TODO: this shouldnt use asserts
@@ -256,8 +256,8 @@ class DP(Conf):
             self._set_default(table_name, table_id)
             table_id += 1 # pytype: disable=none-attr
 
-    def _get_label_id(self):
-        return hash(self._id) - ((1<<20) - 1)
+    def get_mpls_label(self, label):
+        return hash(label) & ((1<<20) - 1)
 
     def add_acl(self, acl_ident, acl):
         self.acls[acl_ident] = acl
