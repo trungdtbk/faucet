@@ -189,7 +189,7 @@ class Valve(object):
             self.dp.vip_table: (
                 'eth_type', 'eth_dst', 'ip_proto', 'arp_tpa'),
             self.dp.mpls_table: (
-                'mpls_label'),
+                'eth_type', 'mpls_label'),
             self.dp.eth_dst_table: (
                 'in_port', 'vlan_vid', 'eth_dst'),
             self.dp.flood_table: (
@@ -513,6 +513,36 @@ class Valve(object):
                      [valve_of.goto_table(self.dp.eth_dst_table)])]
         return []
 
+    def _add_adjacent_dp(self, neigh_dp):
+        ofmsgs = []
+        if self.dp.stack is None:
+            return []
+        shortest_path = self.dp.shortest_path(neigh_dp)
+        if shortest_path is not None and shortest_path[1] == neigh_dp:
+            port = self.dp.shortest_path_port(neigh_dp)
+            if port is not None:
+                mpls_label = valve_util.str_to_mpls_label(neigh_dp)
+                ofmsgs.append(self.valve_flowmod(
+                    table_id=self.dp.mpls_table,
+                    match=self.valve_in_match(
+                        self.dp.mpls_table,
+                        eth_type=ether.ETH_TYPE_MPLS,
+                        mpls_label=mpls_label),
+                    priority=self.dp.highest_priority,
+                    inst=[valve_of.apply_actions([valve_of.output_port(port.number)])]))
+        return ofmsgs
+
+    def _add_adjacent_dps(self):
+        ofmsgs = []
+        if self.dp.stack is None:
+            return []
+        all_dps = self.dp.stack['graph'].nodes()
+        for neigh_dp in all_dps:
+            if neigh_dp == self.dp.name:
+                continue
+            ofmsgs.extend(self._add_adjacent_dp(neigh_dp))
+        return ofmsgs
+
     def _add_default_flows(self):
         """Configure datapath with necessary default tables and rules."""
         ofmsgs = []
@@ -524,6 +554,7 @@ class Valve(object):
         ofmsgs.extend(self._add_default_drop_flows())
         ofmsgs.extend(self._add_vlan_flood_flow())
         ofmsgs.extend(self._add_source_route_flows())
+        ofmsgs.extend(self._add_adjacent_dps())
         return ofmsgs
 
     def _add_vlan(self, vlan, all_port_nums):
