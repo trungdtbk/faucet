@@ -498,6 +498,21 @@ class Valve(object):
                 valve_of.controller_pps_meteradd(pps=self.dp.packetin_pps)]
         return []
 
+    def _add_source_route_flows(self):
+        if self.dp.stack is not None:
+            mpls_label = valve_util.str_to_mpls_label(self.dp.name)
+            return [self.valve_flowmod(
+                self.dp.eth_src_table,
+                match=self.valve_in_match(
+                    self.dp.eth_src_table,
+                    eth_type=ether.ETH_TYPE_MPLS,
+                    mpls_label=mpls_label,
+                    mpls_bos=1),
+                priority=self.dp.high_priority,
+                inst=[valve_of.apply_actions([valve_of.pop_mpls_act()])] +
+                     [valve_of.goto_table(self.dp.eth_dst_table)])]
+        return []
+
     def _add_default_flows(self):
         """Configure datapath with necessary default tables and rules."""
         ofmsgs = []
@@ -508,6 +523,7 @@ class Valve(object):
                 ofmsgs.append(meter.entry_msg)
         ofmsgs.extend(self._add_default_drop_flows())
         ofmsgs.extend(self._add_vlan_flood_flow())
+        ofmsgs.extend(self._add_source_route_flows())
         return ofmsgs
 
     def _add_vlan(self, vlan, all_port_nums):
