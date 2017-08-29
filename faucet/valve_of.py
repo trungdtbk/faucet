@@ -535,10 +535,13 @@ def controller_pps_meterdel(datapath=None):
         meter_id=ofp.OFPM_CONTROLLER)
 
 
-def push_mpls_act(mpls_label):
-    return [
-            parser.OFPActionPushMpls(),
-            parser.OFPActionSetField(mpls_label=mpls_label)]
+def push_mpls_act(mpls_label, mpls_tc=None):
+    act = []
+    act.append(parser.OFPActionPushMpls())
+    act.append(parser.OFPActionSetField(mpls_label=mpls_label))
+    if mpls_tc is not None:
+        act.append(parser.OFPActionSetField(mpls_tc=mpls_tc))
+    return act
 
 def pop_mpls_act(eth_type=ether.ETH_TYPE_IP):
     return parser.OFPActionPopMpls(eth_type)
