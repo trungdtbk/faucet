@@ -76,3 +76,6 @@ def dpid_log(dpid):
 
 def btos(b_str):
     return b_str.encode('utf-8').decode('utf-8', 'strict')
+
+def str_to_mpls_label(label):
+    return hash(label) & ((1<<20) - 1)
