@@ -287,6 +287,7 @@ class Valve(object):
             self.dp.eth_src_table,
             self.dp.ipv4_fib_table,
             self.dp.ipv6_fib_table,
+            self.dp.mpls_table,
             self.dp.eth_dst_table,
             self.dp.flood_table)
 
@@ -499,19 +500,29 @@ class Valve(object):
         return []
 
     def _add_source_route_flows(self):
+        """Match on MPLS, if the label is of the current dp and bos=1,
+        pop and forward packet to the dst_table, otherwise forward to mpls_table."""
+        ofmsgs = []
         if self.dp.stack is not None:
             mpls_label = valve_util.str_to_mpls_label(self.dp.name)
-            return [self.valve_flowmod(
-                self.dp.eth_src_table,
-                match=self.valve_in_match(
+            for mpls_bos, next_table, eth_type in [
+                    (0, self.dp.mpls_table, ether.ETH_TYPE_MPLS),
+                    (1, self.dp.eth_dst_table, ether.ETH_TYPE_IP)]:
+                ofmsgs.append(self.valve_flowmod(
                     self.dp.eth_src_table,
-                    eth_type=ether.ETH_TYPE_MPLS,
-                    mpls_label=mpls_label,
-                    mpls_bos=1),
-                priority=self.dp.high_priority,
-                inst=[valve_of.apply_actions([valve_of.pop_mpls_act()])] +
-                     [valve_of.goto_table(self.dp.eth_dst_table)])]
-        return []
+                    match=self.valve_in_match(
+                        self.dp.eth_src_table,
+                        eth_type=ether.ETH_TYPE_MPLS,
+                        mpls_label=mpls_label,
+                        mpls_bos=mpls_bos),
+                    priority=self.dp.highest_priority,
+                    inst=[
+                        valve_of.apply_actions([
+                            valve_of.pop_mpls_act(eth_type=eth_type)]),
+                        valve_of.goto_table(next_table)
+                        ]))
+
+        return ofmsgs
 
     def _add_adjacent_dp(self, neigh_dp):
         ofmsgs = []
@@ -529,7 +540,9 @@ class Valve(object):
                         eth_type=ether.ETH_TYPE_MPLS,
                         mpls_label=mpls_label),
                     priority=self.dp.highest_priority,
-                    inst=[valve_of.apply_actions([valve_of.output_port(port.number)])]))
+                    inst=[valve_of.apply_actions([
+                        valve_of.output_port(port.number)])]))
+
         return ofmsgs
 
     def _add_adjacent_dps(self):
