@@ -19,8 +19,10 @@
 
 try:
     import valve_of
+    import valve_util
 except ImportError:
     from faucet import valve_of
+    from faucet import valve_util
 
 
 def rewrite_vlan(output_dict):
@@ -67,6 +69,13 @@ def build_acl_entry(rule_conf, acl_allow_inst, meters, port_num=None, vlan_vid=N
                     valve_of.apply_actions([valve_of.output_port(port_no)]))
                 if not allow_specified:
                     allow = True
+            if 'path' in attrib_value:
+                path_actions = []
+                for dp_name in attrib_value['path'][::-1]:
+                    path_actions.extend(valve_of.push_mpls_act(
+                        mpls_label=valve_util.str_to_mpls_label(dp_name)))
+                acl_inst.append(valve_of.apply_actions(path_actions))
+                #acl_inst.append(valve_of.goto_table(3))
             if 'output' in attrib_value:
                 output_dict = attrib_value['output']
                 output_actions = []
