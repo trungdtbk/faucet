@@ -142,9 +142,10 @@ class ValveRouteManager(object):
         ofmsgs = []
         if self.routers:
             ofmsgs.append(valve_of.set_vlan_vid(vlan.vid))
-        ofmsgs.extend([
-            valve_of.set_eth_src(vlan.faucet_mac),
-            valve_of.set_eth_dst(eth_dst)])
+        if self.dp_id == dp_id:
+            # Rewrite source MAC only if the gw is local
+            ofmsgs.append(valve_of.set_eth_src(vlan.faucet_mac))
+        ofmsgs.append(valve_of.set_eth_dst(eth_dst))
         if self.dec_ttl:
             ofmsgs.append(valve_of.dec_ip_ttl())
         return ofmsgs
@@ -244,7 +245,7 @@ class ValveRouteManager(object):
             inst = [valve_of.apply_actions([valve_of.group_act(
                 group_id=self.ip_gw_to_group_id[ip_gw])])]
         else:
-            inst = [valve_of.apply_actions(self._nexthop_actions(eth_dst, vlan)),
+            inst = [valve_of.apply_actions(self._nexthop_actions(dp_id, eth_dst, vlan)),
                     valve_of.goto_table(self.eth_dst_table)]
         for routed_vlan in self._routed_vlans(vlan):
             in_match = self._route_match(routed_vlan, ip_dst)
