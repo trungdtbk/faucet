@@ -79,7 +79,7 @@ class ValveRouteManager(object):
     ICMP_TYPE = None
     MAX_LEN = 96
 
-    def __init__(self, logger, arp_neighbor_timeout,
+    def __init__(self, dp_id, logger, arp_neighbor_timeout,
                  max_hosts_per_resolve_cycle, max_host_fib_retry_count,
                  max_resolve_backoff_time, proactive_learn, dec_ttl,
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
@@ -87,6 +87,7 @@ class ValveRouteManager(object):
                  valve_in_match, valve_flowdel, valve_flowmod,
                  valve_flowcontroller, use_group_table, routers,
                  send_event=None):
+        self.dp_id = dp_id
         self.logger = logger
         self.arp_neighbor_timeout = arp_neighbor_timeout
         self.max_hosts_per_resolve_cycle = max_hosts_per_resolve_cycle

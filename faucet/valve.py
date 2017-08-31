@@ -151,7 +151,7 @@ class Valve(object):
                 (self.dp.ipv4_fib_table, valve_route.ValveIPv4RouteManager),
                 (self.dp.ipv6_fib_table, valve_route.ValveIPv6RouteManager)):
             route_manager = route_manager_class(
-                self.logger, self.dp.arp_neighbor_timeout,
+                self.dp.dp_id, self.logger, self.dp.arp_neighbor_timeout,
                 self.dp.max_hosts_per_resolve_cycle, self.dp.max_host_fib_retry_count,
                 self.dp.max_resolve_backoff_time, self.dp.proactive_learn, self.DEC_TTL,
                 fib_table, self.dp.vip_table, self.dp.eth_src_table,
