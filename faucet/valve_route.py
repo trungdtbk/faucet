@@ -610,7 +610,7 @@ class ValveRouteManager(object):
                     self._add_host_fib_route(pkt_meta.vlan, src_ip))
                 ofmsgs.extend(self._update_nexthop(
                     pkt_meta.vlan.dp_id,
-                    pkt_meta.vlan, pkt_meta.port, pkt_meta.eth_src, src_ip))
+                    pkt_meta.vlan, pkt_meta.port, pkt_meta.eth_src, src_ip, True))
         return ofmsgs
 
     def _del_route_flows(self, vlan, ip_dst):
@@ -737,7 +737,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
                 ofmsgs.extend(
                     self._add_host_fib_route(vlan, src_ip))
                 ofmsgs.extend(self._update_nexthop(
-                    vlan.dp_id, vlan, port, eth_src, src_ip))
+                    vlan.dp_id, vlan, port, eth_src, src_ip, True))
                 arp_reply = valve_packet.arp_reply(
                     vid, vlan.faucet_mac, eth_src, dst_ip, src_ip)
                 ofmsgs.append(
@@ -747,8 +747,8 @@ class ValveIPv4RouteManager(ValveRouteManager):
                         dst_ip, src_ip, eth_src, vlan.vid))
             elif (opcode == arp.ARP_REPLY and
                   pkt_meta.eth_dst == vlan.faucet_mac):
-                ofmsgs.extend(
-                    self._update_nexthop(vlan.dp_id, vlan, port, eth_src, src_ip))
+                ofmsgs.extend(self._update_nexthop(
+                    vlan.dp_id, vlan, port, eth_src, src_ip, True))
                 self.logger.info(
                     'ARP response %s (%s) on VLAN %u' % (
                         src_ip, eth_src, vlan.vid))
@@ -885,7 +885,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
                     ofmsgs.extend(
                         self._add_host_fib_route(vlan, src_ip))
                     ofmsgs.extend(self._update_nexthop(
-                        vlan.dp_id, vlan, port, eth_src, src_ip))
+                        vlan.dp_id, vlan, port, eth_src, src_ip, True))
                     nd_reply = valve_packet.nd_advert(
                         vid, vlan.faucet_mac, eth_src,
                         solicited_ip, src_ip)
@@ -896,7 +896,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
                             solicited_ip, src_ip, eth_src, vlan.vid))
             elif icmpv6_type == icmpv6.ND_NEIGHBOR_ADVERT:
                 ofmsgs.extend(self._update_nexthop(
-                    vlan.dp_id, vlan, port, eth_src, src_ip))
+                    vlan.dp_id, vlan, port, eth_src, src_ip, True))
                 self.logger.info(
                     'ND advert %s (%s) on VLAN %u' % (
                         src_ip, eth_src, vlan.vid))
@@ -907,7 +907,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
                         ofmsgs.extend(
                             self._add_host_fib_route(vlan, src_ip))
                         ofmsgs.extend(self._update_nexthop(
-                            vlan.dp_id, vlan, port, eth_src, src_ip))
+                            vlan.dp_id, vlan, port, eth_src, src_ip, True))
                         ra_advert = valve_packet.router_advert(
                             vlan, vid, vlan.faucet_mac, eth_src,
                             vip.ip, src_ip, other_vips)

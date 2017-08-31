@@ -519,12 +519,11 @@ class Faucet(app_manager.RyuApp):
     def handle_route_change(self, route_event):
         from_dp = self.valves[route_event.dp_id].dp
         route_change = route_event.msg
-        change_type = route_change._type
+        change_type = route_change.type
         vlan_vid = route_change.vlan_vid
         prefix = route_change.prefix
         nexthop = route_change.nexthop
         cached_nexthop = route_change.cached_nexthop
-
         for dp_id, valve in list(self.valves.items()):
             if dp_id == from_dp.dp_id or vlan_vid not in valve.dp.vlans:
                 continue
@@ -536,6 +535,6 @@ class Faucet(app_manager.RyuApp):
                 flowmods = valve.del_route(vlan, ip_dst=prefix)
             elif change_type == RESOLVE_NH:
                 flowmods = valve.update_nexthop(
-                    from_dp, vlan, cached_nexthop.eth_src, nexthop)
+                    vlan, from_dp, cached_nexthop.eth_src, nexthop)
             if flowmods and valve.dp.running:
                 self._send_flow_msgs(dp_id, flowmods)
