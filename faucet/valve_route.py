@@ -83,7 +83,7 @@ class ValveRouteManager(object):
                  max_hosts_per_resolve_cycle, max_host_fib_retry_count,
                  max_resolve_backoff_time, proactive_learn, dec_ttl,
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
-                 route_priority,
+                 mpls_table, route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
                  valve_flowcontroller, use_group_table, routers,
                  send_event=None):
@@ -100,6 +100,7 @@ class ValveRouteManager(object):
         self.eth_src_table = eth_src_table
         self.eth_dst_table = eth_dst_table
         self.flood_table = flood_table
+        self.mpls_table = mpls_table
         self.route_priority = route_priority
         self.valve_in_match = valve_in_match
         self.valve_flowdel = valve_flowdel
