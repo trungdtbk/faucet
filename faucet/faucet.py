@@ -33,6 +33,8 @@ from ryu.controller import ofp_event
 from ryu.lib import hub
 
 try:
+    from valve_route import EventFaucetRouteChange
+    from valve_route import ADD_ROUTE, DEL_ROUTE, RESOLVE_NH
     from config_parser import dp_parser, get_config_for_api
     from config_parser_util import config_changed
     from valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
@@ -43,6 +45,8 @@ try:
     import valve_packet
     import valve_of
 except ImportError:
+    from faucet.valve_route import EventFaucetRouteChange
+    from faucet.valve_route import ADD_ROUTE, DEL_ROUTE, RESOLVE_NH
     from faucet.config_parser import dp_parser, get_config_for_api
     from faucet.config_parser_util import config_changed
     from faucet.valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
@@ -509,3 +513,29 @@ class Faucet(app_manager.RyuApp):
             flowmods = valve.flow_timeout(msg.table_id, msg.match)
             if flowmods:
                 self._send_flow_msgs(ryu_dp.id, flowmods)
+
+    @set_ev_cls(EventFaucetRouteChange, MAIN_DISPATCHER)
+    @kill_on_exception(exc_logname)
+    def handle_route_change(self, route_event):
+        from_dp = self.valves[route_event.dp_id].dp
+        route_change = route_event.msg
+        change_type = route_change._type
+        vlan_vid = route_change.vlan_vid
+        prefix = route_change.prefix
+        nexthop = route_change.nexthop
+        cached_nexthop = route_change.cached_nexthop
+
+        for dp_id, valve in list(self.valves.items()):
+            if dp_id == from_dp.dp_id or vlan_vid not in valve.dp.vlans:
+                continue
+            flowmods = []
+            vlan = valve.dp.vlans[vlan_vid]
+            if change_type == ADD_ROUTE:
+                flowmods = valve.add_route(vlan, ip_dst=prefix, ip_gw=nexthop)
+            elif change_type == DEL_ROUTE:
+                flowmods = valve.del_route(vlan, ip_dst=prefix)
+            elif change_type == RESOLVE_NH:
+                flowmods = valve.update_nexthop(
+                    from_dp, vlan, cached_nexthop.eth_src, nexthop)
+            if flowmods and valve.dp.running:
+                self._send_flow_msgs(dp_id, flowmods)

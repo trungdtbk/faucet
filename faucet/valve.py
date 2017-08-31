@@ -1387,6 +1387,18 @@ class Valve(object):
         route_manager = self.route_manager_by_ipv[ip_dst.version]
         return route_manager.del_route(vlan, ip_dst)
 
+    def update_nexthop(self, vlan, remote_dp, eth_src, ip_gw):
+        ofmsgs = []
+        if self.dp.stack is None:
+            return []
+        outport = self.dp.shortest_path_port(remote_dp.name)
+        if outport is not None:
+            route_manager = self.route_manager_by_ipv[ip_gw.version]
+            ofmsgs = route_manager._update_nexthop(
+                remote_dp.dp_id, vlan, outport, eth_src, ip_gw)
+
+        return ofmsgs
+
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.
 

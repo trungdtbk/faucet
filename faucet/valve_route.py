@@ -289,7 +289,8 @@ class ValveRouteManager(object):
             group_mod_method(group_id=group_id, buckets=buckets))
         return ofmsgs
 
-    def _update_nexthop(self, dp_id, vlan, port, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, dp_id, vlan, port, eth_src, resolved_ip_gw,
+                        broadcast=False):
         """Update routes where nexthop is newly resolved or changed.
 
         Args:
@@ -318,6 +319,13 @@ class ValveRouteManager(object):
                         vlan, ip_gw, ip_dst, eth_src, is_updated))
 
         self._update_nexthop_cache(dp_id, port.number, vlan, eth_src, resolved_ip_gw)
+        if broadcast:
+            cached_nexthop_entry = self._vlan_nexthop_cache_entry(
+                vlan, resolved_ip_gw)
+            self.broadcast_route_change(
+                dp_id=vlan.dp_id, change_type=RESOLVE_NH,
+                vlan_vid=vlan.vid, nexthop=resolved_ip_gw,
+                cached_nexthop=cached_nexthop_entry)
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -547,6 +555,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        self.broadcast_route_change(vlan.dp_id, ADD_ROUTE,
+            vlan_vid=vlan.vid, prefix=host_route, nexthop=host_ip)
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -559,6 +569,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        self.broadcast_route_change(vlan.dp_id, DEL_ROUTE,
+            vlan_vid=vlan.vid, prefix=host_route, nexthop=host_ip)
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
