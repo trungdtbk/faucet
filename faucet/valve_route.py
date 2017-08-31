@@ -265,8 +265,8 @@ class ValveRouteManager(object):
         nexthop_cache = self._vlan_nexthop_cache(vlan)
         nexthop_cache[ip_gw] = nexthop
 
-    def _nexthop_group_buckets(self, vlan, port, eth_src):
-        actions = self._nexthop_actions(eth_src, vlan)
+    def _nexthop_group_buckets(self, dp_id, vlan, port, eth_src):
+        actions = self._nexthop_actions(dp_id, eth_src, vlan)
         if not vlan.port_is_tagged(port):
             actions.append(valve_of.pop_vlan())
         actions.append(valve_of.output_port(port.number))
@@ -274,10 +274,10 @@ class ValveRouteManager(object):
         return buckets
 
     def _update_nexthop_group(self, is_updated, resolved_ip_gw,
-                              vlan, port, eth_src):
+                              dp_id, vlan, port, eth_src):
         group_mod_method = None
         group_id = None
-        buckets = self._nexthop_group_buckets(vlan, port, eth_src)
+        buckets = self._nexthop_group_buckets(dp_id, vlan, port, eth_src)
         ofmsgs = []
         if is_updated:
             group_mod_method = valve_of.groupmod
@@ -313,7 +313,7 @@ class ValveRouteManager(object):
                 ofmsgs.extend(
                     self._update_nexthop_group(
                         is_updated, resolved_ip_gw,
-                        vlan, port, eth_src))
+                        dp_id, vlan, port, eth_src))
             routes = self._vlan_routes(vlan)
             for ip_dst, ip_gw in list(routes.items()):
                 if ip_gw == resolved_ip_gw:
