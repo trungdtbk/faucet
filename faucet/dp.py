@@ -322,7 +322,7 @@ class DP(Conf):
 
         graph = networkx.MultiGraph()
         for dp in dps:
-            graph.add_node(dp.name)
+            graph.add_node(dp.name, dp_id=dp.dp_id)
             for port in dp.stack_ports:
                 edge = canonical_edge(dp, port)
                 edge_a, edge_z = edge
