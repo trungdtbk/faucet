@@ -499,11 +499,11 @@ class Valve(object):
                 valve_of.controller_pps_meteradd(pps=self.dp.packetin_pps)]
         return []
 
-    def _add_flow_to_remote_dp(self, remote_dp):
+    def _add_flow_to_remote_dp(self, dp_name, dp_id):
         ofmsgs = []
-        outport = self.dp.shortest_path_port(remote_dp)
+        outport = self.dp.shortest_path_port(dp_name)
         if outport is not None:
-            mpls_label = hash(remote_dp) & ((1<<20) - 1)
+            mpls_label = hash(dp_id) & ((1<<20) - 1)
             ofmsgs.append(self.valve_flowmod(
                 table_id=self.dp.mpls_table,
                 match=self.valve_in_match(
@@ -519,7 +519,7 @@ class Valve(object):
         if self.dp.stack is None:
             return []
 
-        mpls_label = hash(self.dp.name) & ((1<<20) - 1)
+        mpls_label = hash(self.dp.dp_id) & ((1<<20) - 1)
         ofmsgs.append(self.valve_flowmod(
             self.dp.eth_src_table,
             match=self.valve_in_match(
@@ -539,10 +539,11 @@ class Valve(object):
             inst=[valve_of.goto_table(self.dp.mpls_table)]))
 
         all_dps = self.dp.stack['graph'].nodes()
-        for remote_dp in all_dps:
-            if remote_dp == self.dp.name:
+        for dp_name in all_dps:
+            if dp_name == self.dp.name:
                 continue
-            ofmsgs.extend(self._add_flow_to_remote_dp(remote_dp))
+            dp_id = self.dp.stack['graph'].node[dp_name]['dp_id']
+            ofmsgs.extend(self._add_flow_to_remote_dp(dp_name, dp_id))
         return ofmsgs
 
     def _add_default_flows(self):
