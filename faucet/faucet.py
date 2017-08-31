@@ -183,7 +183,7 @@ class Faucet(app_manager.RyuApp):
                 if valve_cl is None:
                     self.logger.fatal('Could not configure %s', new_dp.name)
                 else:
-                    valve = valve_cl(new_dp, self.logname)
+                    valve = valve_cl(new_dp, self.logname, self.send_event)
                     self.valves[dp_id] = valve
                 self.logger.info('Add new datapath %s', dpid_log(dp_id))
             valve.update_config_metrics(self.metrics)

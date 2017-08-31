@@ -25,6 +25,7 @@ from ryu.lib import mac
 from ryu.lib.packet import arp, icmp, icmpv6, ipv4, ipv6
 from ryu.ofproto import ether
 from ryu.ofproto import inet
+from ryu.controller import event
 
 try:
     import valve_of
@@ -35,6 +36,27 @@ except ImportError:
     from faucet import valve_packet
     from faucet.valve_util import btos
 
+
+ADD_ROUTE = 1
+DEL_ROUTE = 2
+RESOLVE_NH = 3
+
+class RouteChange(object):
+
+    def __init__(self, type_, vlan_vid=None,
+                 prefix=None, nexthop=None,
+                 cached_nexthop=None):
+        self.type = type_
+        self.vlan_vid = vlan_vid
+        self.prefix = prefix
+        self.nexthop = nexthop
+        self.cached_nexthop = cached_nexthop
+
+class EventFaucetRouteChange(event.EventBase):
+
+    def __init__(self, dp_id, msg):
+        self.dp_id = dp_id
+        self.msg = msg
 
 class NextHop(object):
     """Describes a directly connected (at layer 2) nexthop."""
@@ -60,7 +82,8 @@ class ValveRouteManager(object):
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
                  route_priority,
                  valve_in_match, valve_flowdel, valve_flowmod,
-                 valve_flowcontroller, use_group_table, routers):
+                 valve_flowcontroller, use_group_table, routers,
+                 send_event=None):
         self.logger = logger
         self.arp_neighbor_timeout = arp_neighbor_timeout
         self.max_hosts_per_resolve_cycle = max_hosts_per_resolve_cycle
@@ -79,6 +102,7 @@ class ValveRouteManager(object):
         self.valve_flowmod = valve_flowmod
         self.valve_flowcontroller = valve_flowcontroller
         self.use_group_table = use_group_table
+        self.send_event = send_event
         # TODO: if any router config present, we globally route between
         # all VLANs - we want however to be able to restrict routing
         # as required.
@@ -613,6 +637,16 @@ class ValveRouteManager(object):
 
     def control_plane_handler(self, pkt_meta):
         pass
+
+    def broadcast_route_change(self, dp_id, change_type,
+                               vlan_vid=None, prefix=None, nexthop=None,
+                               cached_nexthop=None):
+        if self.send_event is None:
+            return
+        routechange = RouteChange(type_=change_type, vlan_vid=vlan_vid,
+                                  prefix=prefix, nexthop=nexthop,
+                                  cached_nexthop=cached_nexthop)
+        self.send_event("Faucet", EventFaucetRouteChange(dp_id, routechange))
 
 
 class ValveIPv4RouteManager(ValveRouteManager):

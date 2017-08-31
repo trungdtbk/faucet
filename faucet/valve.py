@@ -134,7 +134,7 @@ class Valve(object):
     DEC_TTL = True
     L3 = False
 
-    def __init__(self, dp, logname):
+    def __init__(self, dp, logname, send_event=None):
         self.dp = dp
         self.logger = ValveLogger(
             logging.getLogger(logname + '.valve'), self.dp.dp_id)
@@ -143,6 +143,7 @@ class Valve(object):
         self._last_packet_in_sec = 0
         self._last_advertise_sec = 0
         self._register_table_match_types()
+        self.send_event = send_event
         # TODO: functional flow managers require too much state.
         # Should interface with a common composer class.
         self.route_manager_by_ipv = {}
@@ -158,7 +159,8 @@ class Valve(object):
                 self.dp.highest_priority,
                 self.valve_in_match, self.valve_flowdel, self.valve_flowmod,
                 self.valve_flowcontroller,
-                self.dp.group_table_routing, self.dp.routers)
+                self.dp.group_table_routing, self.dp.routers,
+                self.send_event)
             self.route_manager_by_ipv[route_manager.IPV] = route_manager
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.flood_table, self.dp.low_priority,
