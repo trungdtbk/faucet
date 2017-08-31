@@ -96,7 +96,7 @@ vlans:
 """
     DP_ID = 1
     NUM_PORTS = 5
-    NUM_TABLES = 9
+    NUM_TABLES = 10
     P1_V100_MAC = '00:00:00:01:00:01'
     P2_V200_MAC = '00:00:00:02:00:02'
     P3_V200_MAC = '00:00:00:02:00:03'
