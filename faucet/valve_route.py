@@ -138,7 +138,7 @@ class ValveRouteManager(object):
         return vlan.flood_pkt(
             self._neighbor_resolver_pkt, faucet_vip, ip_gw)
 
-    def _nexthop_actions(self, eth_dst, vlan):
+    def _nexthop_actions(self, dp_id, eth_dst, vlan):
         ofmsgs = []
         if self.routers:
             ofmsgs.append(valve_of.set_vlan_vid(vlan.vid))
@@ -229,7 +229,7 @@ class ValveRouteManager(object):
             vlan, priority, faucet_vip, faucet_vip_host))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated):
+    def _add_resolved_route(self, dp_id, vlan, ip_gw, ip_dst, eth_dst, is_updated):
         ofmsgs = []
         if is_updated:
             self.logger.info(
@@ -317,7 +317,7 @@ class ValveRouteManager(object):
             for ip_dst, ip_gw in list(routes.items()):
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
-                        vlan, ip_gw, ip_dst, eth_src, is_updated))
+                        dp_id, vlan, ip_gw, ip_dst, eth_src, is_updated))
 
         self._update_nexthop_cache(dp_id, port.number, vlan, eth_src, resolved_ip_gw)
         if broadcast:
@@ -536,13 +536,14 @@ class ValveRouteManager(object):
                 return ofmsgs
 
         routes[ip_dst] = ip_gw
-        cached_eth_dst = self._cached_nexthop_eth_dst(vlan, ip_gw)
-        if cached_eth_dst is not None:
+        cached_nexthop = self._vlan_nexthop_cache_entry(vlan, ip_gw)
+        if cached_nexthop is not None and cached_nexthop.eth_src is not None:
             ofmsgs.extend(self._add_resolved_route(
+                dp_id=cached_nexthop.dp_id,
                 vlan=vlan,
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
-                eth_dst=cached_eth_dst,
+                eth_dst=cached_nexthop.eth_src,
                 is_updated=False))
         return ofmsgs
 
