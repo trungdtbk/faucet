@@ -3,6 +3,15 @@
 .. meta::
    :keywords: OpenFlow, Ryu, Faucet, VLAN, SDN
 
+============
+Introduction
+============
+This branch contains developments for experiments of SDN/OpenFlow applications into
+ISP networks. These include:
+
+- Routing over distributed switch
+- Distribution of FIB entries across switches
+
 ======
 Faucet
 ======
