@@ -182,7 +182,7 @@ class Valve(object):
                 'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type'),
             self.dp.eth_src_table: (
                 'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type',
-                'ip_proto', 'icmpv6_type'),
+                'ip_proto', 'icmpv6_type', 'mpls_label'),
             self.dp.ipv4_fib_table: (
                 'vlan_vid', 'eth_type', 'ipv4_dst'),
             self.dp.ipv6_fib_table: (
@@ -499,6 +499,52 @@ class Valve(object):
                 valve_of.controller_pps_meteradd(pps=self.dp.packetin_pps)]
         return []
 
+    def _add_flow_to_remote_dp(self, remote_dp):
+        ofmsgs = []
+        outport = self.dp.shortest_path_port(remote_dp)
+        if outport is not None:
+            mpls_label = hash(remote_dp) & ((1<<20) - 1)
+            ofmsgs.append(self.valve_flowmod(
+                table_id=self.dp.mpls_table,
+                match=self.valve_in_match(
+                    self.dp.mpls_table,
+                    eth_type=ether.ETH_TYPE_MPLS,
+                    mpls_label=mpls_label),
+                priority=self.dp.highest_priority,
+                inst=[valve_of.apply_actions([valve_of.output_port(outport.number)])]))
+        return ofmsgs
+
+    def _add_source_route_flows(self):
+        ofmsgs = []
+        if self.dp.stack is None:
+            return []
+
+        mpls_label = hash(self.dp.name) & ((1<<20) - 1)
+        ofmsgs.append(self.valve_flowmod(
+            self.dp.eth_src_table,
+            match=self.valve_in_match(
+                self.dp.eth_src_table,
+                eth_type=ether.ETH_TYPE_MPLS,
+                mpls_label=mpls_label),
+            priority=self.dp.highest_priority + 1,
+            inst=[
+                valve_of.apply_actions([valve_of.pop_mpls_act()]),
+                valve_of.goto_table(self.dp.eth_dst_table)]))
+        ofmsgs.append(self.valve_flowmod(
+            self.dp.eth_src_table,
+            match=self.valve_in_match(
+                self.dp.eth_src_table,
+                eth_type=ether.ETH_TYPE_MPLS),
+            priority=self.dp.highest_priority,
+            inst=[valve_of.goto_table(self.dp.mpls_table)]))
+
+        all_dps = self.dp.stack['graph'].nodes()
+        for remote_dp in all_dps:
+            if remote_dp == self.dp.name:
+                continue
+            ofmsgs.extend(self._add_flow_to_remote_dp(remote_dp))
+        return ofmsgs
+
     def _add_default_flows(self):
         """Configure datapath with necessary default tables and rules."""
         ofmsgs = []
@@ -611,6 +657,7 @@ class Valve(object):
         ofmsgs.extend(self._add_default_flows())
         ofmsgs.extend(self._add_ports_and_vlans(discovered_up_port_nums))
         ofmsgs.extend(self._add_controller_learn_flow())
+        ofmsgs.extend(self._add_source_route_flows())
         self.dp.running = True
         return ofmsgs
 
