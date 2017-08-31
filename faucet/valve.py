@@ -289,6 +289,7 @@ class Valve(object):
             self.dp.ipv4_fib_table,
             self.dp.ipv6_fib_table,
             self.dp.eth_dst_table,
+            self.dp.mpls_table,
             self.dp.flood_table)
 
     def valve_flowmod(self, table_id, match=None, priority=None,
