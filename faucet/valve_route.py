@@ -30,11 +30,11 @@ from ryu.controller import event
 try:
     import valve_of
     import valve_packet
-    from valve_util import btos
+    from valve_util import btos, encode_mpls_label
 except ImportError:
     from faucet import valve_of
     from faucet import valve_packet
-    from faucet.valve_util import btos
+    from faucet.valve_util import btos, encode_mpls_label
 
 
 ADD_ROUTE = 1
@@ -143,12 +143,15 @@ class ValveRouteManager(object):
         ofmsgs = []
         if self.routers:
             ofmsgs.append(valve_of.set_vlan_vid(vlan.vid))
-        if self.dp_id == dp_id:
-            # Rewrite source MAC only if the gw is local
-            ofmsgs.append(valve_of.set_eth_src(vlan.faucet_mac))
-        ofmsgs.append(valve_of.set_eth_dst(eth_dst))
+        ofmsgs.append(valve_of.set_eth_src(vlan.faucet_mac))
         if self.dec_ttl:
             ofmsgs.append(valve_of.dec_ip_ttl())
+        if self.dp_id != dp_id:
+            # Tunnel packets to the remote DP using source-route
+            ofmsgs.extend([valve_of.pop_vlan()] +
+                valve_of.push_mpls_act(encode_mpls_label(eth_dst)) +
+                valve_of.push_mpls_act(encode_mpls_label(dp_id)))
+        ofmsgs.append(valve_of.set_eth_dst(eth_dst))
         return ofmsgs
 
     def _route_match(self, vlan, ip_dst):
@@ -246,8 +249,12 @@ class ValveRouteManager(object):
             inst = [valve_of.apply_actions([valve_of.group_act(
                 group_id=self.ip_gw_to_group_id[ip_gw])])]
         else:
-            inst = [valve_of.apply_actions(self._nexthop_actions(dp_id, eth_dst, vlan)),
-                    valve_of.goto_table(self.eth_dst_table)]
+            inst = [valve_of.apply_actions(self._nexthop_actions(dp_id, eth_dst, vlan))]
+            next_table = self.eth_dst_table
+            if self.dp_id != dp_id:
+                next_table = self.mpls_table
+            inst.append(valve_of.goto_table(next_table))
+
         for routed_vlan in self._routed_vlans(vlan):
             in_match = self._route_match(routed_vlan, ip_dst)
             ofmsgs.append(self.valve_flowmod(
@@ -320,6 +327,20 @@ class ValveRouteManager(object):
                 if ip_gw == resolved_ip_gw:
                     ofmsgs.extend(self._add_resolved_route(
                         dp_id, vlan, ip_gw, ip_dst, eth_src, is_updated))
+
+            if self.dp_id == dp_id:
+                actions = [valve_of.pop_mpls_act()]
+                if vlan.port_is_tagged(port):
+                    actions.extend(valve_of.push_vlan_act(vlan.vid))
+                actions.append(valve_of.output_port(port.number))
+                ofmsgs.append(self.valve_flowmod(
+                    self.eth_src_table,
+                    match=self.valve_in_match(
+                        self.eth_src_table,
+                        eth_type=ether.ETH_TYPE_MPLS,
+                        mpls_label=encode_mpls_label(eth_src)),
+                    priority=self.route_priority + 2,
+                    inst=[valve_of.apply_actions(actions)]))
 
         self._update_nexthop_cache(dp_id, port.number, vlan, eth_src, resolved_ip_gw)
         if broadcast:
