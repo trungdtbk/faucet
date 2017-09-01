@@ -146,7 +146,8 @@ class VLAN(Conf):
             for route in self.routes:
                 ip_dst = ipaddress.ip_network(btos(route['ip_dst']))
                 if 'next_dp' in route:
-                    self.dyn_tunnel_routes_by_ipv[ip_dst.version] = route['next_dp']
+                    next_dp = route['next_dp']
+                    self.dyn_tunnel_routes_by_ipv[ip_dst.version][ip_dst] = next_dp
                     continue
                 ip_gw = ipaddress.ip_address(btos(route['ip_gw']))
                 assert ip_gw.version == ip_dst.version
