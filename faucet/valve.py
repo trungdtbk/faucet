@@ -551,6 +551,12 @@ class Valve(object):
                     valve_of.pop_mpls_act()] +
                     valve_of.push_vlan_act(vlan.vid))] + [
                     valve_of.goto_table(self.dp.ipv4_fib_table)]))
+            for ipv in vlan.ipvs():
+                for ip_dst, next_dp in list(
+                        vlan.dyn_tunnel_routes_by_ipv[ipv].items()):
+                    dp_id = self.dp.stack['graph'].node[next_dp]['dp_id']
+                    ofmsgs.extend(self.route_manager_by_ipv[ipv].add_route(
+                        vlan, ip_dst=ip_dst, next_dp=dp_id))
 
         all_dps = self.dp.stack['graph'].nodes()
         for dp_name in all_dps:
@@ -1441,10 +1447,12 @@ class Valve(object):
             self.L3 = True
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw=None, ip_dst=None, next_dp=None):
         """Add route to VLAN routing table."""
+        if ip_dst is None:
+            return []
         route_manager = self.route_manager_by_ipv[ip_dst.version]
-        return route_manager.add_route(vlan, ip_gw, ip_dst)
+        return route_manager.add_route(vlan, ip_gw, ip_dst, next_dp)
 
     def del_route(self, vlan, ip_dst):
         """Delete route from VLAN routing table."""
