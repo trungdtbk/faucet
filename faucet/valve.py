@@ -179,10 +179,10 @@ class Valve(object):
         # the flows they need, themselves.
         self.TABLE_MATCH_TYPES = {
             self.dp.vlan_table: (
-                'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type'),
+                'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type', 'mpls_label'),
             self.dp.eth_src_table: (
                 'in_port', 'vlan_vid', 'eth_src', 'eth_dst', 'eth_type',
-                'ip_proto', 'icmpv6_type', 'mpls_label'),
+                'ip_proto', 'icmpv6_type', 'mpls_label', 'mpls_bos'),
             self.dp.ipv4_fib_table: (
                 'vlan_vid', 'eth_type', 'ipv4_dst'),
             self.dp.ipv6_fib_table: (
@@ -504,13 +504,12 @@ class Valve(object):
         ofmsgs = []
         outport = self.dp.shortest_path_port(dp_name)
         if outport is not None:
-            mpls_label = hash(dp_id) & ((1<<20) - 1)
             ofmsgs.append(self.valve_flowmod(
                 table_id=self.dp.mpls_table,
                 match=self.valve_in_match(
                     self.dp.mpls_table,
                     eth_type=ether.ETH_TYPE_MPLS,
-                    mpls_label=mpls_label),
+                    mpls_label=valve_util.encode_mpls_label(dp_id)),
                 priority=self.dp.highest_priority,
                 inst=[valve_of.apply_actions([valve_of.output_port(outport.number)])]))
         return ofmsgs
@@ -520,24 +519,38 @@ class Valve(object):
         if self.dp.stack is None:
             return []
 
-        mpls_label = hash(self.dp.dp_id) & ((1<<20) - 1)
         ofmsgs.append(self.valve_flowmod(
-            self.dp.eth_src_table,
+            self.dp.vlan_table,
             match=self.valve_in_match(
-                self.dp.eth_src_table,
+                self.dp.vlan_table,
                 eth_type=ether.ETH_TYPE_MPLS,
-                mpls_label=mpls_label),
-            priority=self.dp.highest_priority + 1,
+                mpls_label=valve_util.encode_mpls_label(self.dp.dp_id)),
+            priority=self.dp.highest_priority + 2,
             inst=[
-                valve_of.apply_actions([valve_of.pop_mpls_act()]),
-                valve_of.goto_table(self.dp.eth_dst_table)]))
+                valve_of.apply_actions([
+                    valve_of.pop_mpls_act(eth_type=ether.ETH_TYPE_MPLS)]),
+                valve_of.goto_table(self.dp.eth_src_table)]))
         ofmsgs.append(self.valve_flowmod(
-            self.dp.eth_src_table,
+            self.dp.vlan_table,
             match=self.valve_in_match(
-                self.dp.eth_src_table,
+                self.dp.vlan_table,
                 eth_type=ether.ETH_TYPE_MPLS),
-            priority=self.dp.highest_priority,
+            priority=self.dp.highest_priority + 1,
             inst=[valve_of.goto_table(self.dp.mpls_table)]))
+
+        for vlan in list(self.dp.vlans.values()):
+            ofmsgs.append(self.valve_flowmod(
+                self.dp.eth_src_table,
+                match=self.valve_in_match(
+                    self.dp.eth_src_table,
+                    eth_type=ether.ETH_TYPE_MPLS,
+                    mpls_label=valve_util.encode_mpls_label(vlan.vid),
+                    mpls_bos=1),
+                priority=self.dp.highest_priority + 2,
+                inst=[valve_of.apply_actions([
+                    valve_of.pop_mpls_act()] +
+                    valve_of.push_vlan_act(vlan.vid))] + [
+                    valve_of.goto_table(self.dp.ipv4_fib_table)]))
 
         all_dps = self.dp.stack['graph'].nodes()
         for dp_name in all_dps:
