@@ -540,7 +540,7 @@ class ValveRouteManager(object):
                 break
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw=None, ip_dst=None, next_dp=None):
         """Add a route to the RIB.
 
         Args:
@@ -553,6 +553,23 @@ class ValveRouteManager(object):
         ofmsgs = []
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
+
+        if next_dp is not None:
+            # add a special FIB that tunnels packets to the NEXT DP
+            for routed_vlan in self._routed_vlans(vlan):
+                in_match = self._route_match(routed_vlan, ip_dst)
+                inst = [valve_of.apply_actions(
+                    [valve_of.pop_vlan()] +
+                valve_of.push_mpls_act(encode_mpls_label(vlan.vid)) +
+                valve_of.push_mpls_act(encode_mpls_label(next_dp)))] + [
+                        valve_of.goto_table(self.mpls_table)]
+                ofmsgs.append(self.valve_flowmod(
+                    self.fib_table,
+                    in_match,
+                    priority=self._route_priority(ip_dst),
+                    inst=inst))
+            return ofmsgs
+
         routes = self._vlan_routes(vlan)
         if ip_dst in routes:
             if routes[ip_dst] == ip_gw:
