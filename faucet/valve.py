@@ -222,6 +222,7 @@ class Valve(object):
 
         Vendor specific configuration should be implemented here.
         """
+        #pylint: disable=unused-argument
         return []
 
     def ofchannel_log(self, ofmsgs):
