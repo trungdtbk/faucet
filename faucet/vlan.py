@@ -195,9 +195,9 @@ class VLAN(Conf):
             'bgp_neighbor_addresses', self.bgp_neighbour_addresses)
 
     def __str__(self):
-        #pylint: disable no-member
         port_list = [str(x) for x in self.get_ports()]
         ports = ','.join(port_list)
+        # pylint: disable=no-member
         return 'VLAN %s vid:%s ports:%s' % (self.name, self.vid, ports)
 
     def __repr__(self):
