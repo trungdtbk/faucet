@@ -539,6 +539,8 @@ class Valve(object):
             inst=[valve_of.goto_table(self.dp.mpls_table)]))
 
         for vlan in list(self.dp.vlans.values()):
+            actions = [valve_of.pop_mpls_act()]
+            actions.extend(valve_of.push_vlan_act(vlan.vid))
             ofmsgs.append(self.valve_flowmod(
                 self.dp.eth_src_table,
                 match=self.valve_in_match(
@@ -547,9 +549,8 @@ class Valve(object):
                     mpls_label=valve_util.encode_mpls_label(vlan.vid),
                     mpls_bos=1),
                 priority=self.dp.highest_priority + 2,
-                inst=[valve_of.apply_actions([
-                    valve_of.pop_mpls_act()] +
-                    valve_of.push_vlan_act(vlan.vid))] + [
+                inst=[
+                    valve_of.apply_actions(actions),
                     valve_of.goto_table(self.dp.ipv4_fib_table)]))
             for ipv in vlan.ipvs():
                 for ip_dst, next_dp in list(

@@ -536,8 +536,7 @@ def controller_pps_meterdel(datapath=None):
 
 
 def push_mpls_act(mpls_label):
-    return [
-            parser.OFPActionPushMpls(),
+    return [parser.OFPActionPushMpls(),
             parser.OFPActionSetField(mpls_label=mpls_label)]
 
 def pop_mpls_act(eth_type=ether.ETH_TYPE_IP):

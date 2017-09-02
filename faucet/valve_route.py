@@ -55,6 +55,7 @@ class RouteChange(object):
 class EventFaucetRouteChange(event.EventBase):
 
     def __init__(self, dp_id, msg):
+        super(EventFaucetRouteChange, self).__init__()
         self.dp_id = dp_id
         self.msg = msg
 
@@ -148,9 +149,9 @@ class ValveRouteManager(object):
             ofmsgs.append(valve_of.dec_ip_ttl())
         if self.dp_id != dp_id:
             # Tunnel packets to the remote DP using source-route
-            ofmsgs.extend([valve_of.pop_vlan()] +
-                valve_of.push_mpls_act(encode_mpls_label(eth_dst)) +
-                valve_of.push_mpls_act(encode_mpls_label(dp_id)))
+            ofmsgs.extend([valve_of.pop_vlan()])
+            ofmsgs.extend(valve_of.push_mpls_act(encode_mpls_label(eth_dst)))
+            ofmsgs.extend(valve_of.push_mpls_act(encode_mpls_label(dp_id)))
         ofmsgs.append(valve_of.set_eth_dst(eth_dst))
         return ofmsgs
 
@@ -221,6 +222,7 @@ class ValveRouteManager(object):
         return ofmsgs
 
     def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host):
+        #pylint: disable=unused-argument
         return []
 
     def add_faucet_vip(self, vlan, faucet_vip):
@@ -433,6 +435,7 @@ class ValveRouteManager(object):
         return in_fib
 
     def advertise(self, vlan):
+        #pylint: disable=unused-argument
         return []
 
     def resolve_gateways(self, vlan, now):
@@ -558,10 +561,10 @@ class ValveRouteManager(object):
             # add a special FIB that tunnels packets to the NEXT DP
             for routed_vlan in self._routed_vlans(vlan):
                 in_match = self._route_match(routed_vlan, ip_dst)
-                inst = [valve_of.apply_actions(
-                    [valve_of.pop_vlan()] +
-                valve_of.push_mpls_act(encode_mpls_label(vlan.vid)) +
-                valve_of.push_mpls_act(encode_mpls_label(next_dp)))] + [
+                actions = [valve_of.pop_vlan()]
+                actions.extend(valve_of.push_mpls_act(encode_mpls_label(vlan.vid)))
+                actions.extend(valve_of.push_mpls_act(encode_mpls_label(next_dp)))
+                inst = [valve_of.apply_actions(actions),
                         valve_of.goto_table(self.mpls_table)]
                 ofmsgs.append(self.valve_flowmod(
                     self.fib_table,
@@ -597,8 +600,9 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
-        self.broadcast_route_change(vlan.dp_id, ADD_ROUTE,
-            vlan_vid=vlan.vid, prefix=host_route, nexthop=host_ip)
+        self.broadcast_route_change(
+            vlan.dp_id, ADD_ROUTE, vlan_vid=vlan.vid,
+            prefix=host_route, nexthop=host_ip)
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -611,8 +615,9 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
-        self.broadcast_route_change(vlan.dp_id, DEL_ROUTE,
-            vlan_vid=vlan.vid, prefix=host_route, nexthop=host_ip)
+        self.broadcast_route_change(
+            vlan.dp_id, DEL_ROUTE, vlan_vid=vlan.vid,
+            prefix=host_route, nexthop=host_ip)
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
