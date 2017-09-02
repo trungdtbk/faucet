@@ -502,6 +502,7 @@ class Valve(object):
         return []
 
     def _add_flow_to_remote_dp(self, dp_name, dp_id):
+        """Build source routing rules for individual remote DP"""
         ofmsgs = []
         outport = self.dp.shortest_path_port(dp_name)
         if outport is not None:
@@ -516,6 +517,10 @@ class Valve(object):
         return ofmsgs
 
     def _add_source_route_flows(self):
+        """Build rules that route packets based on MPLS label to simulate segment
+        routing. Each DP maintains rules to all other DPs. A DP can send a packet
+        to other DP by inserting their ID as MPLS label to packet header, or a
+        sequence of DP IDs to specify the path. Stack configuration is needed."""
         ofmsgs = []
         if self.dp.stack is None:
             return []
