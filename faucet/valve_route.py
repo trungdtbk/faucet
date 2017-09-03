@@ -42,7 +42,7 @@ DEL_ROUTE = 2
 RESOLVE_NH = 3
 
 class RouteChange(object):
-
+    """ A routing change object """
     def __init__(self, type_, vlan_vid=None,
                  prefix=None, nexthop=None,
                  cached_nexthop=None):
@@ -53,6 +53,7 @@ class RouteChange(object):
         self.cached_nexthop = cached_nexthop
 
 class EventFaucetRouteChange(event.EventBase):
+    """A Ryu event to exchange routing changes (e.g. resolved nexthop) between DPs"""
 
     def __init__(self, dp_id, msg):
         super(EventFaucetRouteChange, self).__init__()
@@ -704,6 +705,7 @@ class ValveRouteManager(object):
     def broadcast_route_change(self, dp_id, change_type,
                                vlan_vid=None, prefix=None, nexthop=None,
                                cached_nexthop=None):
+        """Fire a RouteChange event to inform other DPs about changes"""
         if self.send_event is None:
             return
         routechange = RouteChange(type_=change_type, vlan_vid=vlan_vid,

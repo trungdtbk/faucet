@@ -1467,6 +1467,7 @@ class Valve(object):
         return route_manager.del_route(vlan, ip_dst)
 
     def update_nexthop(self, vlan, remote_dp, eth_src, ip_gw):
+        """Update nexthop upon receiving a RESOLVE_NH event from other DP"""
         ofmsgs = []
         if self.dp.stack is None:
             return []

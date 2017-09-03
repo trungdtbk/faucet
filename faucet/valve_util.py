@@ -78,4 +78,5 @@ def btos(b_str):
     return b_str.encode('utf-8').decode('utf-8', 'strict')
 
 def encode_mpls_label(value):
+    """Encode a value into MPLS 20-bit"""
     return hash(value) & ((1<<20) - 1)
