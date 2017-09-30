@@ -39,7 +39,9 @@ except ImportError:
 class NextHop(object):
     """Describes a directly connected (at layer 2) nexthop."""
 
-    def __init__(self, eth_src, now):
+    def __init__(self, vlan, port, eth_src, now):
+        self.vlan = vlan
+        self.port = port
         self.eth_src = eth_src
         self.cache_time = now
         self.last_retry_time = None
@@ -198,9 +200,9 @@ class ValveRouteManager(object):
                 in_match, priority=self._route_priority(ip_dst), inst=inst))
         return ofmsgs
 
-    def _update_nexthop_cache(self, vlan, eth_src, ip_gw):
+    def _update_nexthop_cache(self, vlan, port, eth_src, ip_gw):
         now = time.time()
-        nexthop = NextHop(eth_src, now)
+        nexthop = NextHop(vlan, port, eth_src, now)
         nexthop_cache = self._vlan_nexthop_cache(vlan)
         nexthop_cache[ip_gw] = nexthop
 
@@ -253,7 +255,7 @@ class ValveRouteManager(object):
                     ofmsgs.extend(self._add_resolved_route(
                         vlan, ip_gw, ip_dst, eth_src, is_updated))
 
-        self._update_nexthop_cache(vlan, eth_src, resolved_ip_gw)
+        self._update_nexthop_cache(vlan, port, eth_src, resolved_ip_gw)
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -281,7 +283,7 @@ class ValveRouteManager(object):
         """
         for ip_gw, _ in ip_gws:
             if self._vlan_nexthop_cache_entry(vlan, ip_gw) is None:
-                self._update_nexthop_cache(vlan, None, ip_gw)
+                self._update_nexthop_cache(vlan, None, None, ip_gw)
 
     def _retry_backoff(self, now, resolve_retries, last_retry_time):
         backoff_seconds = min(
