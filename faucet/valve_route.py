@@ -251,7 +251,7 @@ class ValveRouteManager(object):
             ofmsgs.extend(nexthop_group.add())
         return ofmsgs
 
-    def _update_nexthop(self, vlan, port, eth_src, resolved_ip_gw):
+    def _update_nexthop(self, vlan, port, eth_src, resolved_ip_gw, fire_event=False):
         """Update routes where nexthop is newly resolved or changed.
 
         Args:
@@ -280,6 +280,11 @@ class ValveRouteManager(object):
                         vlan, ip_gw, ip_dst, eth_src, is_updated))
 
         self._update_nexthop_cache(vlan, port, eth_src, resolved_ip_gw)
+        if fire_event:
+            cached_nexthop = self._vlan_nexthop_cache_entry(vlan, resolved_ip_gw)
+            self.fire_route_change_event(EVENT_RESOLVE_GW, vlan=vlan,
+                                            nexthop=resolved_ip_gw,
+                                            cached_nexthop=cached_nexthop)
         return ofmsgs
 
     def _vlan_ip_gws(self, vlan):
@@ -507,6 +512,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        self.fire_route_change_event(
+            EVENT_ADD_ROUTE, vlan, prefix=host_route, nexthop=host_ip)
         return self.add_route(vlan, host_ip, host_route)
 
     def _del_host_fib_route(self, vlan, host_ip):
@@ -519,6 +526,8 @@ class ValveRouteManager(object):
             list: OpenFlow messages.
         """
         host_route = ipaddress.ip_network(host_ip.exploded)
+        self.fire_route_change_event(
+            EVENT_DEL_ROUTE, vlan, prefix=host_route)
         return self.del_route(vlan, host_route)
 
     def _ip_pkt(self, pkt):
