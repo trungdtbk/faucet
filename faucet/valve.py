@@ -520,6 +520,16 @@ class Valve(object):
                     priority=self.dp.low_priority,
                     inst=[valve_of.goto_table(eth_src_table)]))
                 port_vlans = list(self.dp.vlans.values())
+
+                # Do not spoof FAUCET_MAC packets coming from stack ports
+                for vlan in port_vlans:
+                    if vlan.faucet_vips:
+                        ofmsgs.append(vlan_table.flowmod(
+                            match=eth_src_table.match(
+                                eth_src=vlan.faucet_mac,
+                                in_port=port.number),
+                            priority=self.dp.highest_priority,
+                            inst=[valve_of.goto_table(self.dp.tables['eth_dst'])]))
             else:
                 mirror_act = []
                 # Add mirroring if any
