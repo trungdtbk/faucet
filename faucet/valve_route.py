@@ -25,6 +25,7 @@ from ryu.lib import mac
 from ryu.lib.packet import arp, icmp, icmpv6, ipv4, ipv6
 from ryu.ofproto import ether
 from ryu.ofproto import inet
+from ryu.controller import event
 
 try:
     import valve_of
@@ -35,6 +36,28 @@ except ImportError:
     from faucet import valve_packet
     from faucet.valve_util import btos
 
+EVENT_ADD_ROUTE = 0
+EVENT_DEL_ROUTE = 1
+EVENT_RESOLVE_GW = 2
+
+class RouteChange(object):
+    """Represent a routing change: add-route, del-route or resolve-gw"""
+
+    def __init__(self, type_, vlan_vid=None,
+                 prefix=None, nexthop=None, cached_nexthop=None):
+        self.type = type_
+        self.vlan_vid = vlan_vid
+        self.prefix = prefix
+        self.nexthop = nexthop
+        self.cached_nexthop = cached_nexthop
+
+class FaucetEventRouteChange(event.EventBase):
+    """A Ryu event used to exchange routing changes between Valve instances"""
+
+    def __init__(self, dp_id, msg):
+        super(FaucetEventRouteChange, self).__init__()
+        self.dp_id = dp_id
+        self.msg = msg
 
 class NextHop(object):
     """Describes a directly connected (at layer 2) nexthop."""
@@ -61,7 +84,7 @@ class ValveRouteManager(object):
                  max_hosts_per_resolve_cycle, max_host_fib_retry_count,
                  max_resolve_backoff_time, proactive_learn, dec_ttl,
                  fib_table, vip_table, eth_src_table, eth_dst_table, flood_table,
-                 route_priority, routers, use_group_table, groups):
+                 route_priority, routers, use_group_table, groups, send_event):
         self.logger = logger
         self.arp_neighbor_timeout = arp_neighbor_timeout
         self.max_hosts_per_resolve_cycle = max_hosts_per_resolve_cycle
@@ -78,6 +101,7 @@ class ValveRouteManager(object):
         self.routers = routers
         self.use_group_table = use_group_table
         self.groups = groups
+        self.send_event = send_event
 
     @staticmethod
     def _vlan_vid(vlan, port):
@@ -572,6 +596,15 @@ class ValveRouteManager(object):
 
     def control_plane_handler(self, pkt_meta):
         pass
+
+    def fire_route_change_event(self, type_, vlan, prefix=None,
+                                nexthop=None, cached_nexthop=None):
+        """Fire a route change event to inform other Valve instances"""
+        if self.send_event is None:
+            return
+        route_change = RouteChange(type_=type_, vlan_vid=vlan.vid, prefix=prefix,
+                                   nexthop=nexthop, cached_nexthop=cached_nexthop)
+        self.send_event("Faucet", FaucetEventRouteChange(vlan.dp_id, route_change))
 
 
 class ValveIPv4RouteManager(ValveRouteManager):

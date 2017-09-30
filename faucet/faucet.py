@@ -37,6 +37,8 @@ try:
     from config_parser_util import config_changed
     from valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
     from valve import valve_factory, SUPPORTED_HARDWARE
+    from valve_route import FaucetEventRouteChange
+    from valve_route import EVENT_ADD_ROUTE, EVENT_DEL_ROUTE, EVENT_RESOLVE_GW
     import faucet_api
     import faucet_bgp
     import faucet_metrics
@@ -47,6 +49,8 @@ except ImportError:
     from faucet.config_parser_util import config_changed
     from faucet.valve_util import dpid_log, get_logger, kill_on_exception, get_sys_prefix
     from faucet.valve import valve_factory, SUPPORTED_HARDWARE
+    from faucet.valve_route import FaucetEventRouteChange
+    from faucet.valve_route import EVENT_ADD_ROUTE, EVENT_DEL_ROUTE, EVENT_RESOLVE_GW
     from faucet import faucet_api
     from faucet import faucet_bgp
     from faucet import faucet_metrics
@@ -188,7 +192,7 @@ class Faucet(app_manager.RyuApp):
                         sorted(list(SUPPORTED_HARDWARE.keys())))
                     continue
                 else:
-                    valve = valve_cl(new_dp, self.logname)
+                    valve = valve_cl(new_dp, self.logname, self.send_event)
                     self.valves[dp_id] = valve
                 self.logger.info('Add new datapath %s', dpid_log(dp_id))
             self.metrics.reset_dpid(dp_id)
@@ -517,3 +521,30 @@ class Faucet(app_manager.RyuApp):
             flowmods = valve.flow_timeout(msg.table_id, msg.match)
             if flowmods:
                 self._send_flow_msgs(ryu_dp.id, flowmods)
+
+    @set_ev_cls(FaucetEventRouteChange, MAIN_DISPATCHER)
+    @kill_on_exception(exc_logname)
+    def route_change_handler(self, route_event):
+        learned_on_dp = self.valves[route_event.dp_id].dp
+        msg = route_event.msg
+        change_type = msg.type
+        vlan_vid = msg.vlan_vid
+        prefix = msg.prefix
+        nexthop = msg.nexthop
+        cached_nexthop = msg.cached_nexthop
+        for dp_id, valve in list(self.valves.items()):
+            dp = valve.dp
+            if dp_id == learned_on_dp.dp_id or vlan_vid not in valve.dp.vlans:
+                continue
+            flowmods = []
+            vlan = valve.dp.vlans[vlan_vid]
+            if (change_type == EVENT_ADD_ROUTE and
+                    prefix is not None and nexthop is not None):
+                flowmods = valve.add_route(vlan, ip_dst=prefix, ip_gw=nexthop)
+            elif change_type == EVENT_DEL_ROUTE and prefix is not None:
+                flowmods = valve.del_route(vlan, ip_dst=prefix)
+            elif change_type == EVENT_RESOLVE_GW and cached_nexthop is not None:
+                flowmods = valve.update_nexthop(
+                    vlan, learned_on_dp, cached_nexthop.eth_src, nexthop)
+            if flowmods and valve.dp.running:
+                self._send_flow_msgs(dp_id, flowmods)

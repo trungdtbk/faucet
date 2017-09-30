@@ -81,7 +81,7 @@ class Valve(object):
     DEC_TTL = True
     L3 = False
 
-    def __init__(self, dp, logname):
+    def __init__(self, dp, logname, send_event=None):
         self.dp = dp
         self.logger = ValveLogger(
             logging.getLogger(logname + '.valve'), self.dp.dp_id)
@@ -102,7 +102,7 @@ class Valve(object):
                 fib_table, self.dp.tables['vip'], self.dp.tables['eth_src'],
                 self.dp.tables['eth_dst'], self.dp.tables['flood'],
                 self.dp.highest_priority, self.dp.routers,
-                self.dp.group_table_routing, self.dp.groups)
+                self.dp.group_table_routing, self.dp.groups, send_event)
             self.route_manager_by_ipv[route_manager.IPV] = route_manager
         self.flood_manager = valve_flood.ValveFloodManager(
             self.dp.tables['flood'], self.dp.low_priority,
@@ -1188,6 +1188,20 @@ class Valve(object):
         """Delete route from VLAN routing table."""
         route_manager = self.route_manager_by_ipv[ip_dst.version]
         return route_manager.del_route(vlan, ip_dst)
+
+    def update_nexthop(self, vlan, learned_on_dp, eth_src, ip_gw):
+        """Update nexthop upon receiving EVENT_RESOLVE_GW from other Valve instance"""
+        ofmsgs = []
+        if self.dp.stack is None:
+            return []
+        outport = self.dp.shortest_path_port(learned_on_dp.name)
+        if outport is not None:
+            ofmsgs.extend(self.host_manager.learn_host_on_vlan_port(
+                outport, vlan, eth_src))
+            route_manager = self.route_manager_by_ipv[ip_gw.version]
+            ofmsgs.extend(route_manager._update_nexthop(
+                learned_on_dp.dp_id, vlan, outport, eth_src, ip_gw))
+        return ofmsgs
 
     def resolve_gateways(self):
         """Call route managers to re/resolve gateways.
