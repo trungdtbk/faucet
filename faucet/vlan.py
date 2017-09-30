@@ -118,6 +118,7 @@ class VLAN(Conf):
         self.dyn_host_cache = {}
         self.dyn_faucet_vips_by_ipv = collections.defaultdict(list)
         self.dyn_routes_by_ipv = collections.defaultdict(dict)
+        self.dyn_tunnel_routes_by_ipv = collections.defaultdict(dict)
         self.dyn_neigh_cache_by_ipv = collections.defaultdict(dict)
         self.dyn_ipvs = []
 
@@ -139,8 +140,12 @@ class VLAN(Conf):
         if self.routes:
             self.routes = [route['route'] for route in self.routes]
             for route in self.routes:
-                ip_gw = ipaddress.ip_address(btos(route['ip_gw']))
                 ip_dst = ipaddress.ip_network(btos(route['ip_dst']))
+                if 'next_dp' in route:
+                    next_dp = route['next_dp']
+                    self.dyn_tunnel_routes_by_ipv[ip_dst.version][ip_dst] = next_dp
+                    continue
+                ip_gw = ipaddress.ip_address(btos(route['ip_gw']))
                 assert ip_gw.version == ip_dst.version
                 self.dyn_routes_by_ipv[ip_gw.version][ip_dst] = ip_gw
 
@@ -161,6 +166,10 @@ class VLAN(Conf):
     def routes_by_ipv(self, ipv):
         """Return route table for specified IP version on this VLAN."""
         return self.dyn_routes_by_ipv[ipv]
+
+    def tunnel_routes_by_ipv(self, ipv):
+        """Return special routes (tunnel) for specified IP version on this VLAN."""
+        return self.dyn_tunnel_routes_by_ipv[ipv]
 
     def neigh_cache_by_ipv(self, ipv):
         """Return neighbor cache for specified IP version on this VLAN."""

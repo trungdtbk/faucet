@@ -280,6 +280,7 @@ class Valve(object):
             route_manager = self.route_manager_by_ipv[ipv]
             ofmsgs.extend(self._add_faucet_vips(
                 route_manager, vlan, vlan.faucet_vips_by_ipv(ipv)))
+            ofmsgs.extend(self._add_tunnel_routes(route_manager, vlan))
         return ofmsgs
 
     def _del_vlan(self, vlan):
@@ -1186,6 +1187,17 @@ class Valve(object):
         for faucet_vip in faucet_vips:
             ofmsgs.extend(route_manager.add_faucet_vip(vlan, faucet_vip))
             self.L3 = True
+        return ofmsgs
+
+    def _add_tunnel_routes(self, route_manager, vlan):
+        """Add tunnel routes for this VLAN"""
+        ofmsgs = []
+        tunnel_routes = vlan.tunnel_routes_by_ipv(route_manager.IPV)
+        for ip_dst, next_dp in list(tunnel_routes.items()):
+            outport = self.dp.shortest_path_port(next_dp)
+            if outport is None:
+                continue
+            ofmsgs.extend(route_manager.add_tunnel_route(vlan, ip_dst, outport))
         return ofmsgs
 
     def add_route(self, vlan, ip_gw, ip_dst):

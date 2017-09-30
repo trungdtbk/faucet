@@ -475,7 +475,16 @@ class ValveRouteManager(object):
                 break
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_tunnel_route(self, vlan, ip_dst, outport):
+        ofmsgs = []
+        for routed_vlan in self._routed_vlans(vlan):
+            in_match = self._route_match(routed_vlan, ip_dst)
+            ofmsgs.append(self.fib_table.flowmod(
+                in_match, priority=self._route_priority(ip_dst),
+                inst=[valve_of.apply_actions([valve_of.output_port(outport.number)])]))
+        return ofmsgs
+
+    def add_route(self, vlan, ip_gw, ip_dst, outport=None):
         """Add a route to the RIB.
 
         Args:
@@ -488,6 +497,11 @@ class ValveRouteManager(object):
         ofmsgs = []
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
+
+        if outport is not None:
+            ofmsgs.extend(self.add_tunnel_route(vlan, ip_dst, outport))
+            return ofmsgs
+
         routes = self._vlan_routes(vlan)
         if ip_dst in routes:
             if routes[ip_dst] == ip_gw:
