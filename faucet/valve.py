@@ -1200,10 +1200,15 @@ class Valve(object):
             ofmsgs.extend(route_manager.add_tunnel_route(vlan, ip_dst, outport))
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, next_dp=None):
         """Add route to VLAN routing table."""
+        outport = None
+        if next_dp is not None:
+            tunnel_routes = vlan.tunnel_routes_by_ipv(ip_dst.version)
+            tunnel_routes[ip_dst] = next_dp
+            outport = self.dp.shortest_path_port(next_dp)
         route_manager = self.route_manager_by_ipv[ip_dst.version]
-        return route_manager.add_route(vlan, ip_gw, ip_dst)
+        return route_manager.add_route(vlan, ip_gw, ip_dst, outport)
 
     def del_route(self, vlan, ip_dst):
         """Delete route from VLAN routing table."""

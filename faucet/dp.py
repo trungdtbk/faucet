@@ -74,6 +74,9 @@ class DP(Conf):
     tables = {}
     tables_by_id = {}
     meters = {}
+    switch_type = None
+    max_ipv4_fib = None
+    max_ipv6_fib = None
 
     # Values that are set to None will be set using set_defaults
     # they are included here for testing and informational purposes
@@ -141,6 +144,9 @@ class DP(Conf):
         # where config files for pipeline are stored (if any).
         'use_idle_timeout': False,
         #Turn on/off the use of idle timeout for src_table, default OFF.
+        'switch_type': None,
+        'max_ipv4_fib': 1000000, # 1M
+        'max_ipv6_fib': 1000000, # 1M
         }
 
     defaults_types = {
