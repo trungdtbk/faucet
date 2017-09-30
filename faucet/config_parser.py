@@ -82,7 +82,8 @@ def _dp_parser_v2(logger, acls_conf, dps_conf, meters_conf,
     def _dp_add_vlan(dp, vlan):
         if vlan not in dp.vlans:
             dp.add_vlan(vlan)
-            vid_dp[vlan.vid].add(dp.name)
+            if vlan.bgp_routerid:
+                vid_dp[vlan.vid].add(dp.name)
 
             if len(vid_dp[vlan.vid]) > 1:
                 assert not vlan.bgp_routerid, (
