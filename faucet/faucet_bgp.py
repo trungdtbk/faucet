@@ -23,8 +23,10 @@ import ipaddress
 from ryu.services.protocols.bgp.bgpspeaker import BGPSpeaker
 try:
     from valve_util import btos
+    from bgp_alloc import bgp_alloc_factory
 except ImportError:
     from faucet.valve_util import btos
+    from faucet.bgp_alloc import bgp_alloc_factory
 
 
 class FaucetBgp(object):
@@ -35,6 +37,7 @@ class FaucetBgp(object):
         self._valves = None
         self.logger = logger
         self._send_flow_msgs = send_flow_msgs
+        self.vlan_bgp_allocators = {}
 
     def _bgp_route_handler(self, path_change, vlan):
         """Handle a BGP change event.
@@ -61,16 +64,28 @@ class FaucetBgp(object):
                 nexthop, prefix)
             return
 
+        dp_flowmods = {}
+        bgp_allocator = self.vlan_bgp_allocators[vlan]
         if withdraw:
             self.logger.info(
                 'BGP withdraw %s nexthop %s', prefix, nexthop)
-            flowmods = valve.del_route(vlan, prefix)
+            dp_flowmods = bgp_allocator.del_route(prefix)
+            #flowmods = valve.del_route(vlan, prefix)
         else:
             self.logger.info(
                 'BGP add %s nexthop %s', prefix, nexthop)
-            flowmods = valve.add_route(vlan, nexthop, prefix)
-        if flowmods:
-            self._send_flow_msgs(vlan.dp_id, flowmods)
+            egress_switch = None
+            neigh_cache = vlan.neigh_cache_by_ipv(prefix.version)
+            if nexthop in neigh_cache:
+                cached_nexthop = neigh_cache[nexthop]
+                if cached_nexthop.dp_id is not None:
+                    egress_valve = self._valves[cached_nexthop.dp_id]
+                    egress_switch = egress_valve.dp.name
+            dp_flowmods = bgp_allocator.add_route(prefix, nexthop, egress_switch)
+            #flowmods = valve.add_route(vlan, nexthop, prefix)
+        for dp_id, flowmods in list(dp_flowmods.items()):
+            if flowmods:
+                self._send_flow_msgs(vlan.dp_id, flowmods)
 
     def _create_bgp_speaker_for_vlan(self, vlan):
         """Set up BGP speaker for an individual VLAN if required.
@@ -116,6 +131,12 @@ class FaucetBgp(object):
                 bgp_speaker.shutdown()
             for vlan in list(valve.dp.vlans.values()):
                 if vlan.bgp_as:
+                    bgp_allocator = bgp_alloc_factory(self.logger, self._valves, vlan)
+                    dp_ofmsgs = bgp_allocator.initialize()
+                    for dp_id_, flowmods in list(dp_ofmsgs.items()):
+                        if flowmods and valve.dp.running:
+                            self._send_flow_msgs(dp_id_, flowmods)
+                    self.vlan_bgp_allocators[vlan] = bgp_allocator
                     bgp_speakers[vlan] = self._create_bgp_speaker_for_vlan(vlan)
 
     def update_metrics(self):

@@ -6,3 +6,4 @@ pbr>=1.9
 prometheus_client
 pyyaml
 ryu==4.16
+anytree
