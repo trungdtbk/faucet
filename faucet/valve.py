@@ -850,6 +850,9 @@ class Valve(object):
                 neigh_cache_size = len(vlan.neigh_cache_by_ipv(ipv))
                 metrics.vlan_neighbors.labels(
                     dp_id=dp_id, vlan=vlan.vid, ipv=ipv).set(neigh_cache_size)
+                route_size = len(vlan.routes_by_ipv(ipv))
+                metrics.vlan_routes.labels(
+                    dp_id=dp_id, vlan=vlan.vid, ipv=ipv).set(route_size)
             # Repopulate MAC learning.
             hosts_on_port = {}
             for eth_src, host_cache_entry in sorted(list(vlan.host_cache.items())):

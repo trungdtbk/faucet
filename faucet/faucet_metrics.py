@@ -101,6 +101,8 @@ class FaucetMetrics(PromClient):
             ('max address stored as 64bit number to DP ID, port, VLAN, '
              'and n (maximum number of hosts on the port)'),
             ['dp_id', 'port', 'vlan', 'n'])
+        self.vlan_routes = Gauge(
+            'vlan_routes', 'VLAN route count', ['dp_id', 'vlan', 'ipv'])
         self.port_status = Gauge(
             'port_status',
             'status of switch ports',
