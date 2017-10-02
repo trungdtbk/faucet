@@ -132,7 +132,7 @@ class BGPRouteAllocator(object):
             next_egress_idx[idx] = egress
         dp_ofmsgs = collections.defaultdict(list)
         for idx, prefix in enumerate(self.agg_prefixes):
-            egress = next_egress_idx[idx % (len(next_egress_idx) - 1)]
+            egress = next_egress_idx[idx % len(next_egress_idx)]
             self.agg_to_egress[prefix] = self.switches[egress]
             # install default routes to switches
             tree = self.egress_trees[egress]
