@@ -151,8 +151,8 @@ class FaucetBgp(object):
                             dp_id=hex(dp_id), vlan=vlan.vid, neighbor=neighbor).set(
                                 neighbor_state['info']['uptime'])
                         ribs = json.loads(bgp_speaker.rib_get())
-                        for ipv in ('ipv4', 'ipv6'):
+                        for ipv in vlan.ipvs():
                             # pylint: disable=no-member
                             self._metrics.bgp_neighbor_routes.labels(
                                 dp_id=hex(dp_id), vlan=vlan.vid, neighbor=neighbor, ipv=ipv).set(
-                                    len(ribs[ipv]))
+                                    len(ribs["ipv%d" % ipv]))
