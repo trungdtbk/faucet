@@ -52,6 +52,7 @@ IPV6_MAX_HOP_LIM = 255
 
 LLDP_FAUCET_DP_ID = 1
 LLDP_FAUCET_STACK_STATE = 2
+LLDP_FAUCET_AUTH = 3
 
 
 def ipv4_parseable(ip_header_data):
@@ -272,6 +273,15 @@ def faucet_lldp_stack_state_tlvs(dp, port):
             faucet_oui(dp.faucet_dp_mac),
             LLDP_FAUCET_STACK_STATE,
             str(port.dyn_stack_current_state).encode('utf-8')))
+    return tlvs
+
+
+def faucet_lldp_auth_tlvs(dp, port):
+    """Return a LLDP TLV for authentication on a port."""
+    tlvs = []
+    if 'ciphertext' in port.lldp_beacon:
+        tlvs.append((faucet_oui(dp.faucet_dp_mac), LLDP_FAUCET_AUTH,
+            str(port.lldp_beacon['ciphertext']).encode('utf-8')))
     return tlvs
 
 
