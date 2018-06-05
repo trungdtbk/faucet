@@ -16,6 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
+
 from faucet.conf import Conf, InvalidConfigError, test_config_condition
 from faucet import valve_of
 
@@ -136,6 +138,7 @@ class Port(Conf):
         'org_tlvs': list,
         'system_name': str,
         'port_descr': str,
+        'password': str,
     }
 
     lldp_org_tlv_defaults_types = {
@@ -206,6 +209,9 @@ class Port(Conf):
                             '%6.6x' % org_tlv['oui']) # pytype: disable=missing-parameter
                     org_tlvs.append(org_tlv)
                 self.lldp_beacon['org_tlvs'] = org_tlvs
+
+                if self.lldp_beacon['password']:
+                    self.lldp_beacon['ciphertext'] = self.cipher_password(self.lldp_beacon['password'])
         if self.acl_in and self.acls_in:
             raise InvalidConfigError('found both acl_in and acls_in, use only acls_in')
         if self.acl_in and not isinstance(self.acl_in, list):
@@ -306,3 +312,8 @@ class Port(Conf):
     def stack_init(self):
         """Change the current stack state to INIT_DOWN."""
         self.dyn_stack_current_state = STACK_STATE_INIT
+
+    def cipher_password(self, plain):
+        md5_encrypt = hashlib.new('md5')
+        md5_encrypt.update(str(plain).encode('utf-8'))
+        return md5_encrypt.hexdigest()
