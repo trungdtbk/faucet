@@ -470,6 +470,7 @@ class Valve(object):
             for tlv in lldp_beacon['org_tlvs']]
         org_tlvs.extend(valve_packet.faucet_lldp_tlvs(self.dp))
         org_tlvs.extend(valve_packet.faucet_lldp_stack_state_tlvs(self.dp, port))
+        org_tlvs.extend(valve_packet.faucet_lldp_auth_tlvs(self.dp, port))
         # if the port doesn't have a system name set, default to
         # using the system name from the dp
         if lldp_beacon['system_name'] is None:
@@ -897,6 +898,15 @@ class Valve(object):
                     remote_port_id = int(port_id_tlvs[0].port_id)
                     self.logger.info('FAUCET LLDP from %s, port %u' % (
                         valve_util.dpid_log(remote_dp_id), remote_port_id))
+                # authenticate LLDP packet
+                port = pkt_meta.port
+                if 'ciphertext' in port.lldp_beacon:
+                    auth_tlvs = [
+                        tlv for tlv in faucet_tlvs if tlv.subtype == valve_packet.LLDP_FAUCET_AUTH]
+                    if (not auth_tlvs or
+                            auth_tlvs[0].info.decode('utf-8') != port.lldp_beacon['ciphertext']):
+                        self.logger.info('LLDP received on port %u fails authentication' % port.number)
+                        return
                 # update stack port info
                 port_state_tlvs = [
                     tlv for tlv in faucet_tlvs
