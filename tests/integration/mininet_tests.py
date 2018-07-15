@@ -5295,7 +5295,7 @@ class FaucetStringOfDPTest(FaucetTest):
                         'priority': 1
                     }
                 for peer_dp in peer_dps:
-                    if ((first_dp and peer_dp != dpid_count - 1) or second_dp
+                    if (dpid_count <=2 or (first_dp and peer_dp != dpid_count - 1) or second_dp
                             or (not end_dp and peer_dp > i)):
                         peer_stack_port_base = first_stack_port
                     else:
@@ -5548,6 +5548,73 @@ class FaucetStackStringOfDPUntaggedTest(FaucetStringOfDPTest):
         """All untagged hosts in stack topology can reach each other."""
         self.verify_stack_hosts()
         self.verify_no_cable_errors()
+
+
+class FaucetStackRingOfDPTest(FaucetStringOfDPTest):
+
+    NUM_DPS = 3
+    NUM_HOSTS = 2
+
+    def setUp(self): # pylint: disable=invalid-name
+        super(FaucetStackRingOfDPTest, self).setUp()
+        self.build_net(
+            stack=True,
+            n_dps=self.NUM_DPS,
+            n_untagged=self.NUM_HOSTS,
+            untagged_vid=self.VID,
+            switch_to_switch_links=2,
+            stack_ring=True)
+        self.start_net()
+        self.first_host = self.net.hosts[0]
+        self.last_host = self.net.hosts[self.NUM_DPS*self.NUM_HOSTS - 1]
+
+    def wait_for_stack_port_status(self, dpid, port_no, status, timeout=25):
+        controller = self._get_controller()
+        count = 0
+        for _ in range(timeout):
+            count = int(controller.cmd('grep -c "%s. Stack Port %s.%s" %s' % (
+                        dpid, port_no, status, self.env['faucet']['FAUCET_LOG'])))
+            if count:
+                break
+            time.sleep(1)
+        self.assertGreaterEqual(
+            1, count, 'status log "%s" for Port %s on dp %s not found' % (
+                status, port_no, dpid))
+
+    def verify_all_stack_up(self):
+        port_base = self.NUM_HOSTS + 1
+        for dpid in self.dpids:
+            for port_no in range(self.topo.switch_to_switch_links):
+                self.wait_for_stack_port_status(dpid, port_base + port_no, 'UP')
+
+    def verify_stack_has_no_loop(self):
+        tcpdump_filter = 'ether src %s' % self.last_host.MAC()
+        tcpdump_txt = self.tcpdump_helper(
+            self.first_host, tcpdump_filter, [
+                lambda: self.last_host.cmd('ping -c1 %s' % self.first_host.IP())],
+            packets=5)
+        num_arp_received = self.topo.switch_to_switch_links
+        self.assertEqual(num_arp_received, len(re.findall(
+            'who-has %s tell %s' % (self.first_host.IP(), self.last_host.IP()), tcpdump_txt)))
+
+    def verify_stack_port_down(self, dp, port):
+        self.set_port_down(port, dp)
+        self.wait_for_stack_port_status(dp, port, 'DOWN')
+
+    def test_untagged(self):
+        """Stack loop prevention works and hosts can ping each others."""
+        self.verify_stack_has_no_loop()
+        self.verify_all_stack_up()
+        self.retry_net_ping()
+        root_dp = self.dpids[0]
+        last_stack_port = self.NUM_HOSTS + self.topo.switch_to_switch_links + 1
+        self.verify_stack_port_down(root_dp, last_stack_port)
+        #TODO: remove this check when stack failure implemented
+        self.retry_net_ping([self.last_host, self.first_host], required_loss=100)
+        self.set_port_up(last_stack_port, root_dp)
+        self.wait_for_stack_port_status(root_dp, last_stack_port, 'UP')
+        # when port is up, pings should work again
+        self.retry_net_ping([self.last_host, self.first_host], required_loss=0)
 
 
 class FaucetSingleStackAclControlTest(FaucetStringOfDPTest):
