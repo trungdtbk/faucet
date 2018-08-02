@@ -639,6 +639,12 @@ def controller_pps_meterdel(datapath=None):
         flags=ofp.OFPMF_PKTPS,
         meter_id=ofp.OFPM_CONTROLLER)
 
+
+def write_metadata(metadata, mask=(1<<64)-1):
+    """Return instruction that adds metadata to packets."""
+    return parser.OFPInstructionWriteMetadata(metadata, mask)
+
+
 def is_delete(ofmsg):
     return is_flowdel(ofmsg) or is_groupdel(ofmsg) or is_meterdel(ofmsg)
 
