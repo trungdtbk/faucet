@@ -1,3 +1,9 @@
+Multipath Routing
+=================
+A version of Faucet to support multipath routing: FIB tables are extended to hold multiple forwarding entries per prefix. Each entry of the same prefix is identified by a PathID (notion of the controller) and matches packets using a combination (metadata, prefix). Incoming packets are driven towards a path by ACL rules. ACL rules can be defined manually, constructed through BGP Flowspec or a Faucet API.
+
+This development is part of a research on SDN application for interdomain routing in ISP at Victoria University of Wellington, NZ.
+
 Faucet
 ======
 
