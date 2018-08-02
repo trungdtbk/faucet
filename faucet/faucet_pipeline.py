@@ -57,14 +57,14 @@ FAUCET_PIPELINE = (
         'eth_src', False,
         (('eth_dst', True), ('eth_src', False), ('eth_type', False),
          ('in_port', False), ('vlan_vid', False)),
-        None),
+        (('metadata', True))),
     ValveTableConfig(
         'ipv4_fib', False,
-        (('eth_type', False), ('ipv4_dst', True), ('vlan_vid', False)),
+        (('eth_type', False), ('ipv4_dst', True), ('vlan_vid', False), ('metadata', True)),
         ('eth_dst', 'eth_src', 'vlan_vid')),
     ValveTableConfig(
         'ipv6_fib', False,
-        (('eth_type', False), ('ipv6_dst', True), ('vlan_vid', False)),
+        (('eth_type', False), ('ipv6_dst', True), ('vlan_vid', False), ('metadata', True)),
         ('eth_dst', 'eth_src', 'vlan_vid')),
     ValveTableConfig(
         'vip', False,
