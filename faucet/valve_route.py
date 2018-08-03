@@ -197,7 +197,7 @@ class ValveRouteManager:
         for routed_vlan in self._routed_vlans(vlan):
             in_match = self._route_match(routed_vlan, ip_dst, pathid)
             ofmsgs.append(self.fib_table.flowmod(
-                in_match, priority=self._route_priority(ip_dst), inst=inst))
+                in_match, priority=self._route_priority(ip_dst, pathid), inst=inst))
         return ofmsgs
 
     def _update_nexthop_cache(self, now, vlan, eth_src, port, ip_gw):
@@ -325,7 +325,7 @@ class ValveRouteManager:
         Returns:
             True if a host FIB route (and not used as a gateway).
         """
-        ip_dsts = vlan.ip_dsts_for_ip_gw(host_ip)
+        ip_dsts = [ip_dst for ip_dst in vlan.ip_dsts_for_ip_gw(host_ip) if not isinstance(ip_dst, tuple)]
         if (len(ip_dsts) == 1 and
                 ip_dsts[0].prefixlen == ip_dsts[0].max_prefixlen and
                 ip_dsts[0].network_address == host_ip):
@@ -560,7 +560,7 @@ class ValveRouteManager:
                     vlan=routed_vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst,
                     metadata=pathid)
             ofmsgs.extend(self.fib_table.flowdel(
-                route_match, priority=self._route_priority(ip_dst), strict=True))
+                route_match, priority=self._route_priority(ip_dst, pathid), strict=True))
         return ofmsgs
 
     def del_route(self, vlan, ip_dst, pathid=None):
