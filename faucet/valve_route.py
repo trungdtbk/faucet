@@ -119,8 +119,9 @@ class ValveRouteManager:
             ofmsgs.append(valve_of.dec_ip_ttl())
         return ofmsgs
 
-    def _route_match(self, vlan, ip_dst):
-        return self.fib_table.match(vlan=vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst)
+    def _route_match(self, vlan, ip_dst, pathid=None):
+        return self.fib_table.match(
+                vlan=vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst, metadata=pathid)
 
     def _route_priority(self, ip_dst):
         prefixlen = ipaddress.ip_network(ip_dst).prefixlen
@@ -175,7 +176,7 @@ class ValveRouteManager:
             vlan, priority, faucet_vip, faucet_vip_host))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated):
+    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated, pathid=None):
         ofmsgs = []
         if is_updated:
             self.logger.info(
@@ -193,7 +194,7 @@ class ValveRouteManager:
             inst = [valve_of.apply_actions(self._nexthop_actions(eth_dst, vlan)),
                     valve_of.goto_table(self.eth_dst_table)]
         for routed_vlan in self._routed_vlans(vlan):
-            in_match = self._route_match(routed_vlan, ip_dst)
+            in_match = self._route_match(routed_vlan, ip_dst, pathid)
             ofmsgs.append(self.fib_table.flowmod(
                 in_match, priority=self._route_priority(ip_dst), inst=inst))
         return ofmsgs
@@ -247,8 +248,11 @@ class ValveRouteManager:
                         is_updated, resolved_ip_gw,
                         vlan, port, eth_src))
             for ip_dst in vlan.ip_dsts_for_ip_gw(resolved_ip_gw):
+                pathid = None
+                if isinstance(ip_dst, tuple):
+                    ip_dst, pathid = ip_dst
                 ofmsgs.extend(self._add_resolved_route(
-                    vlan, resolved_ip_gw, ip_dst, eth_src, is_updated))
+                    vlan, resolved_ip_gw, ip_dst, eth_src, is_updated, pathid=pathid))
 
         self._update_nexthop_cache(now, vlan, eth_src, port, resolved_ip_gw)
         return ofmsgs
@@ -439,7 +443,7 @@ class ValveRouteManager:
                 break
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pathid=None):
         """Add a route to the RIB.
 
         Args:
@@ -453,11 +457,10 @@ class ValveRouteManager:
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
         routes = self._vlan_routes(vlan)
-        if ip_dst in routes:
-            if routes[ip_dst] == ip_gw:
-                return ofmsgs
-
-        vlan.add_route(ip_dst, ip_gw)
+        if ((pathid is not None and routes.get((ip_dst, pathid)) == ip_gw) or
+                (pathid is None and routes.get(ip_dst) == ip_gw)):
+            return ofmsgs
+        vlan.add_route(ip_dst, ip_gw, pathid)
         cached_eth_dst = self._cached_nexthop_eth_dst(vlan, ip_gw)
         if cached_eth_dst is not None:
             ofmsgs.extend(self._add_resolved_route(
@@ -465,7 +468,8 @@ class ValveRouteManager:
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
                 eth_dst=cached_eth_dst,
-                is_updated=False))
+                is_updated=False,
+                pathid=pathid))
         return ofmsgs
 
     def _add_host_fib_route(self, vlan, host_ip, blackhole=False):
@@ -544,7 +548,7 @@ class ValveRouteManager:
                     now, pkt_meta.vlan, pkt_meta.port, pkt_meta.eth_src, src_ip))
         return ofmsgs
 
-    def _del_route_flows(self, vlan, ip_dst):
+    def _del_route_flows(self, vlan, ip_dst, pathid=None):
         ofmsgs = []
         for routed_vlan in self._routed_vlans(vlan):
             if ip_dst.prefixlen == 0:
@@ -552,12 +556,13 @@ class ValveRouteManager:
                     vlan=routed_vlan, eth_type=self.ETH_TYPE)
             else:
                 route_match = self.fib_table.match(
-                    vlan=routed_vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst)
+                    vlan=routed_vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst,
+                    metadata=pathid)
             ofmsgs.extend(self.fib_table.flowdel(
                 route_match, priority=self._route_priority(ip_dst), strict=True))
         return ofmsgs
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pathid=None):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
@@ -572,9 +577,10 @@ class ValveRouteManager:
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
         routes = self._vlan_routes(vlan)
-        if ip_dst in routes:
-            vlan.del_route(ip_dst)
-            ofmsgs.extend(self._del_route_flows(vlan, ip_dst))
+        if (pathid is not None and (ip_dst, pathid) in routes or
+                (pathid is None and ip_dst in routes)):
+            vlan.del_route(ip_dst, pathid)
+            ofmsgs.extend(self._del_route_flows(vlan, ip_dst, pathid))
             # TODO: need to delete nexthop group if groups are in use.
         return ofmsgs
 

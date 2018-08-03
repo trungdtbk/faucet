@@ -1441,15 +1441,15 @@ class Valve:
             inst=[valve_of.goto_table(self.dp.tables['vlan'])])
         return [ofmsg]
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pathid=None):
         """Add route to VLAN routing table."""
         route_manager = self._route_manager_by_ipv[ip_dst.version]
-        return route_manager.add_route(vlan, ip_gw, ip_dst)
+        return route_manager.add_route(vlan, ip_gw, ip_dst, pathid)
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pathid=None):
         """Delete route from VLAN routing table."""
         route_manager = self._route_manager_by_ipv[ip_dst.version]
-        return route_manager.del_route(vlan, ip_dst)
+        return route_manager.del_route(vlan, ip_dst, pathid)
 
     def resolve_gateways(self, now):
         """Call route managers to re/resolve gateways.
