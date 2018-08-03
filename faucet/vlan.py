@@ -268,10 +268,16 @@ class VLAN(Conf):
                 test_config_condition('ip_dst' not in route, 'missing ip_dst in VLAN route')
                 ip_gw = self._check_ip_str(route['ip_gw'])
                 ip_dst = self._check_ip_str(route['ip_dst'], ip_method=ipaddress.ip_network)
+                pathid = route.get('pathid', None)
+                if pathid:
+                    try:
+                        pathid = int(pathid)
+                    except:
+                        raise InvalidConfigError('%s is not a valid routes value' % route)
                 test_config_condition(
                     ip_gw.version != ip_dst.version,
                     'ip_gw version does not match the ip_dst version')
-                self.add_route(ip_dst, ip_gw)
+                self.add_route(ip_dst, ip_gw, pathid)
 
     @staticmethod
     def vid_valid(vid):
@@ -382,18 +388,24 @@ class VLAN(Conf):
         """Return route table count for specified IP version on this VLAN."""
         return len(self.dyn_routes_by_ipv[ipv])
 
-    def add_route(self, ip_dst, ip_gw):
+    def add_route(self, ip_dst, ip_gw, pathid=None):
         """Add an IP route."""
-        self.dyn_routes_by_ipv[ip_gw.version][ip_dst] = ip_gw
+        ip_dst_ = ip_dst
+        if pathid:
+            ip_dst_ = (ip_dst, pathid)
+        self.dyn_routes_by_ipv[ip_gw.version][ip_dst_] = ip_gw
         if ip_gw not in self.dyn_gws_by_ipv[ip_gw.version]:
             self.dyn_gws_by_ipv[ip_gw.version][ip_gw] = set()
-        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].add(ip_dst)
+        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].add(ip_dst_)
 
-    def del_route(self, ip_dst):
+    def del_route(self, ip_dst, pathid=None):
         """Delete an IP route."""
-        ip_gw = self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
-        del self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
-        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].remove(ip_dst)
+        ip_dst_ = ip_dst
+        if pathid:
+            ip_dst_ = (ip_dst, pathid)
+        ip_gw = self.dyn_routes_by_ipv[ip_dst.version][ip_dst_]
+        del self.dyn_routes_by_ipv[ip_dst.version][ip_dst_]
+        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].remove(ip_dst_)
         if not self.dyn_gws_by_ipv[ip_gw.version][ip_gw]:
             del self.dyn_gws_by_ipv[ip_gw.version][ip_gw]
 
