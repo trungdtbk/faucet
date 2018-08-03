@@ -123,9 +123,10 @@ class ValveRouteManager:
         return self.fib_table.match(
                 vlan=vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst, metadata=pathid)
 
-    def _route_priority(self, ip_dst):
+    def _route_priority(self, ip_dst, pathid=None):
         prefixlen = ipaddress.ip_network(ip_dst).prefixlen
-        return self.route_priority + prefixlen
+        d = 1 if pathid else 0
+        return self.route_priority + prefixlen + d
 
     def _routed_vlans(self, vlan):
         vlans = set([vlan])
