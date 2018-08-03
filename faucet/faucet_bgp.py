@@ -145,6 +145,12 @@ class FaucetBgp:
             vlan_prefixes.append((str(faucet_vip), str(faucet_vip.ip)))
         routes = vlan.routes_by_ipv(ipv)
         for ip_dst, ip_gw in list(routes.items()):
+            pathid = None
+            if isinstance(ip_dst, tuple):
+                ip_dst, pathid = ip_dst
+            if pathid:
+                # TODO: Extend Beka to support BGP multipath
+                continue
             vlan_prefixes.append((str(ip_dst), str(ip_gw)))
         return vlan_prefixes
 
