@@ -6171,3 +6171,130 @@ class FaucetWithUseIdleTimeoutRuleExpiredTest(FaucetWithUseIdleTimeoutTest):
             self.wait_for_flowremoved_msg(src_mac=host.MAC())
             self.wait_for_host_log_msg(host.MAC(), 'expiring host')
             self.wait_for_host_removed(host, in_port=int(port))
+
+
+class FaucetMultipathIPv4RouteTest(FaucetUntaggedIPv4RouteTest):
+
+    CONFIG_GLOBAL = """
+acls:
+    multipath:
+        - rule:
+            eth_type: 2048
+            ipv4_src: 10.0.0.4/32
+            actions:
+                allow: 1
+                pathid: 100
+        - rule:
+            actions:
+                allow: 1
+vlans:
+    100:
+        description: "untagged"
+        faucet_vips: ["10.0.0.254/24"]
+        bgp_port: %(bgp_port)d
+        bgp_server_addresses: ["127.0.0.1"]
+        bgp_as: 1
+        bgp_routerid: "1.1.1.1"
+        bgp_neighbor_addresses: ["127.0.0.1"]
+        bgp_connect_mode: "passive"
+        acl_in: multipath
+        routes:
+            - route:
+                ip_dst: "10.0.1.0/24"
+                ip_gw: "10.0.0.1"
+            - route:
+                ip_dst: "10.0.2.0/24"
+                ip_gw: "10.0.0.2"
+            - route:
+                ip_dst: "10.0.3.0/24"
+                ip_gw: "10.0.0.2"
+            - route:
+                ip_dst: "10.0.3.0/24"
+                ip_gw: "10.0.0.3"
+                pathid: 100
+""" + """
+        bgp_neighbor_as: %u
+""" % PEER_BGP_AS
+
+    def verify_ipv4_routing_mesh(self, with_group_table=False):
+        """Verify hosts can route to each other via FAUCET."""
+        super(FaucetMultipathIPv4RouteTest, self).verify_ipv4_routing_mesh(with_group_table)
+        host_pair = self.net.hosts[-2:]
+        third_host, fourth_host = host_pair
+        third_host_routed_ip = ipaddress.ip_interface(u'10.0.3.3/24')
+        self.add_host_route(
+            fourth_host, third_host_routed_ip, self.FAUCET_VIPV4.ip)
+        self.host_ipv4_alias(third_host, third_host_routed_ip)
+        self.net.ping(hosts=(fourth_host, third_host))
+        self.wait_for_route_as_flow(
+            third_host.MAC(), third_host_routed_ip.network,
+            with_group_table=with_group_table)
+        self.one_ipv4_ping(fourth_host, third_host_routed_ip.ip)
+
+
+class FaucetMultipathIPv6RouteTest(FaucetUntaggedIPv6RouteTest):
+
+    CONFIG_GLOBAL = """
+acls:
+    multipath:
+        - rule:
+            eth_type: 0x86DD
+            ipv6_src: fc00::1:4/128
+            actions:
+                allow: 1
+                pathid: 100
+        - rule:
+            actions:
+                allow: 1
+vlans:
+    100:
+        description: "untagged"
+        faucet_vips: ["fc00::1:254/112"]
+        bgp_port: %(bgp_port)d
+        bgp_server_addresses: ["::1"]
+        bgp_as: 1
+        bgp_routerid: "1.1.1.1"
+        bgp_neighbor_addresses: ["::1"]
+        bgp_connect_mode: "passive"
+        acl_in: multipath
+        routes:
+            - route:
+                ip_dst: "fc00::10:0/112"
+                ip_gw: "fc00::1:1"
+            - route:
+                ip_dst: "fc00::20:0/112"
+                ip_gw: "fc00::1:2"
+            - route:
+                ip_dst: "fc00::30:0/112"
+                ip_gw: "fc00::1:2"
+            - route:
+                ip_dst: "fc00::30:0/112"
+                ip_gw: "fc00::1:3"
+                pathid: 100
+""" + """
+        bgp_neighbor_as: %u
+""" % PEER_BGP_AS
+
+    def verify_ipv6_routing_mesh(self, with_group_table=False):
+        """Verify IPv6 routing between hosts and multiple subnets."""
+        super(FaucetMultipathIPv6RouteTest, self).verify_ipv6_routing_mesh(with_group_table)
+        host_pair = self.net.hosts[-2:]
+        third_host, fourth_host = host_pair
+        third_host_ip = ipaddress.ip_interface(u'fc00::1:3/112')
+        fourth_host_ip = ipaddress.ip_interface(u'fc00::1:4/112')
+        third_host_routed_ip = ipaddress.ip_interface(u'fc00::30:2/112')
+        fourth_host_routed_ip = ipaddress.ip_interface(u'fc00::40:2/112')
+        self.setup_ipv6_hosts_addresses(
+            third_host, third_host_ip, third_host_routed_ip,
+            fourth_host, fourth_host_ip, fourth_host_routed_ip)
+        self.one_ipv6_ping(third_host, fourth_host_ip.ip)
+        self.one_ipv6_ping(fourth_host, third_host_ip.ip)
+        self.add_host_route(
+            fourth_host, third_host_routed_ip, self.FAUCET_VIPV6.ip)
+        self.wait_for_route_as_flow(
+            third_host.MAC(), third_host_routed_ip.network,
+            with_group_table=with_group_table)
+        self.one_ipv6_controller_ping(third_host)
+        self.one_ipv6_controller_ping(fourth_host)
+        self.one_ipv6_ping(fourth_host, third_host_routed_ip.ip)
+
