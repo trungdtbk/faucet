@@ -96,6 +96,7 @@ def build_acl_entry(rule_conf, meters,
     acl_ofmsgs = []
     acl_cookie = None
     allow_inst = acl_allow_inst
+    pathid_inst = None
 
     for attrib, attrib_value in list(rule_conf.items()):
         if attrib == 'in_port':
@@ -132,6 +133,8 @@ def build_acl_entry(rule_conf, meters,
                 # if port specified, output packet now and exit pipeline.
                 if output_port is not None:
                     continue
+            if 'pathid' in attrib_value:
+                pathid_inst = valve_of.write_metadata(attrib_value['pathid'])
 
             if allow:
                 acl_inst.append(allow_inst)
@@ -145,6 +148,8 @@ def build_acl_entry(rule_conf, meters,
         acl_match = valve_of.match_from_dict(acl_match_dict)
     except TypeError:
         raise InvalidConfigError('invalid type in ACL')
+    if pathid_inst:
+        acl_inst = [pathid_inst] + acl_inst
     if acl_act:
         acl_inst.append(valve_of.apply_actions(acl_act))
     return (acl_match, acl_inst, acl_cookie, acl_ofmsgs)

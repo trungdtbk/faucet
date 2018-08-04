@@ -619,12 +619,16 @@ configuration.
             def resolve_noop(_acl, action_conf):
                 return action_conf
 
+            def resolve_multipath(_acl, action_conf):
+                return action_conf
+
             action_resolvers = {
                 'meter': resolve_meter,
                 'mirror': resolve_mirror,
                 'output': resolve_output,
                 'allow': resolve_noop,
                 'force_port_vlan': resolve_noop,
+                'pathid': resolve_multipath,
             }
 
             def build_acl(acl, vid=None):

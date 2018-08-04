@@ -79,6 +79,7 @@ The output action contains a dictionary with the following elements:
         'output': dict,
         'allow': int,
         'force_port_vlan': int,
+        'pathid': int,
     }
     output_actions_types = {
         'port': (str, int),
