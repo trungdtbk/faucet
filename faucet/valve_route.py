@@ -601,7 +601,7 @@ class ValveRouteManager(ValveManagerBase):
                 (routes.get((ip_dst, pathid), None) == ip_gw)):
             return ofmsgs
 
-        vlan.add_route(ip_dst, ip_gw)
+        vlan.add_route(ip_dst, ip_gw, pathid)
         cached_eth_dst = self._cached_nexthop_eth_dst(vlan, ip_gw)
         if cached_eth_dst is not None:
             ofmsgs.extend(self._add_resolved_route(
