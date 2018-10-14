@@ -227,8 +227,9 @@ class ValveRouteManager(ValveManagerBase):
             actions.append(valve_of.dec_ip_ttl())
         return actions
 
-    def _route_match(self, vlan, ip_dst):
-        return self.fib_table.match(vlan=vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst)
+    def _route_match(self, vlan, ip_dst, pathid=None):
+        return self.fib_table.match(
+                vlan=vlan, eth_type=self.ETH_TYPE, nw_dst=ip_dst, metadata=pathid)
 
     def _route_priority(self, ip_dst):
         prefixlen = ipaddress.ip_network(ip_dst).prefixlen
@@ -337,7 +338,7 @@ class ValveRouteManager(ValveManagerBase):
                 vlan, priority, faucet_vip, faucet_vip_host))
         return ofmsgs
 
-    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated):
+    def _add_resolved_route(self, vlan, ip_gw, ip_dst, eth_dst, is_updated, pathid=None):
         ofmsgs = []
         if is_updated:
             self.logger.info(
@@ -352,7 +353,7 @@ class ValveRouteManager(ValveManagerBase):
             actions=self._nexthop_actions(eth_dst, vlan))
         routed_vlans = self._routed_vlans(vlan)
         for routed_vlan in routed_vlans:
-            in_match = self._route_match(routed_vlan, ip_dst)
+            in_match = self._route_match(routed_vlan, ip_dst, pathid)
             ofmsgs.append(self.fib_table.flowmod(
                 in_match, priority=self._route_priority(ip_dst), inst=inst))
         return ofmsgs
@@ -381,8 +382,11 @@ class ValveRouteManager(ValveManagerBase):
         if cached_eth_dst != eth_src:
             is_updated = cached_eth_dst is not None
             for ip_dst in vlan.ip_dsts_for_ip_gw(resolved_ip_gw):
+                pathid = None
+                if isinstance(ip_dst, tuple):
+                    ip_dst, pathid = ip_dst
                 ofmsgs.extend(self._add_resolved_route(
-                    vlan, resolved_ip_gw, ip_dst, eth_src, is_updated))
+                    vlan, resolved_ip_gw, ip_dst, eth_src, is_updated, pathid))
 
         self._update_nexthop_cache(now, vlan, eth_src, port, resolved_ip_gw)
         return ofmsgs
@@ -593,7 +597,8 @@ class ValveRouteManager(ValveManagerBase):
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
         routes = self._vlan_routes(vlan)
-        if routes.get(ip_dst, None) == ip_gw:
+        if ((pathid is None and routes.get(ip_dst, None) == ip_gw) or
+                (routes.get((ip_dst, pathid), None) == ip_gw)):
             return ofmsgs
 
         vlan.add_route(ip_dst, ip_gw)
@@ -604,7 +609,8 @@ class ValveRouteManager(ValveManagerBase):
                 ip_gw=ip_gw,
                 ip_dst=ip_dst,
                 eth_dst=cached_eth_dst,
-                is_updated=False))
+                is_updated=False,
+                pathid=pathid))
         return ofmsgs
 
     def _add_host_fib_route(self, vlan, host_ip, blackhole=False):
@@ -675,11 +681,11 @@ class ValveRouteManager(ValveManagerBase):
                     now, pkt_meta.vlan, pkt_meta.port, pkt_meta.eth_src, src_ip))
         return ofmsgs
 
-    def _del_route_flows(self, vlan, ip_dst):
+    def _del_route_flows(self, vlan, ip_dst, pathid=None):
         ofmsgs = []
         routed_vlans = self._routed_vlans(vlan)
         for routed_vlan in routed_vlans:
-            route_match = self._route_match(routed_vlan, ip_dst)
+            route_match = self._route_match(routed_vlan, ip_dst, pathid)
             ofmsgs.append(self.fib_table.flowdel(
                 route_match, priority=self._route_priority(ip_dst), strict=True))
         return ofmsgs
@@ -699,9 +705,10 @@ class ValveRouteManager(ValveManagerBase):
         if vlan.is_faucet_vip(ip_dst):
             return ofmsgs
         routes = self._vlan_routes(vlan)
-        if ip_dst in routes:
-            vlan.del_route(ip_dst)
-            ofmsgs.extend(self._del_route_flows(vlan, ip_dst))
+        if ((pathid is None and ip_dst in routes) or
+                ((ip_dst, pathid) in routes)):
+            vlan.del_route(ip_dst, pathid)
+            ofmsgs.extend(self._del_route_flows(vlan, ip_dst, pathid))
         return ofmsgs
 
     def control_plane_handler(self, now, pkt_meta):
