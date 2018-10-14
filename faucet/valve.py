@@ -1500,15 +1500,15 @@ class Valve:
             priority=self.dp.highest_priority-1,
             strict=True)]
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pathid=None):
         """Add route to VLAN routing table."""
         route_manager = self._route_manager_by_ipv[ip_dst.version]
-        return route_manager.add_route(vlan, ip_gw, ip_dst)
+        return route_manager.add_route(vlan, ip_gw, ip_dst, pathid)
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pathid=None):
         """Delete route from VLAN routing table."""
         route_manager = self._route_manager_by_ipv[ip_dst.version]
-        return route_manager.del_route(vlan, ip_dst)
+        return route_manager.del_route(vlan, ip_dst, pathid)
 
     def resolve_gateways(self, now, _other_valves):
         """Call route managers to re/resolve gateways.

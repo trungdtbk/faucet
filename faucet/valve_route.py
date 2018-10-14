@@ -570,7 +570,7 @@ class ValveRouteManager(ValveManagerBase):
                         ofmsgs.extend(resolve_flows)
         return ofmsgs
 
-    def add_route(self, vlan, ip_gw, ip_dst):
+    def add_route(self, vlan, ip_gw, ip_dst, pathid=None):
         """Add a route to the RIB.
 
         Args:
@@ -684,7 +684,7 @@ class ValveRouteManager(ValveManagerBase):
                 route_match, priority=self._route_priority(ip_dst), strict=True))
         return ofmsgs
 
-    def del_route(self, vlan, ip_dst):
+    def del_route(self, vlan, ip_dst, pathid=None):
         """Delete a route from the RIB.
 
         Only one route with this exact destination is supported.
