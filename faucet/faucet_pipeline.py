@@ -71,7 +71,8 @@ def _fib_table(ipv, table_id):
     return ValveTableConfig(
         'ipv%u_fib' % ipv,
         table_id,
-        match_types=(('eth_type', False), ('ipv%u_dst' % ipv, True), ('vlan_vid', False)),
+        match_types=(('eth_type', False), ('ipv%u_dst' % ipv, True),
+                     ('vlan_vid', False), ('metadata', True)),
         set_fields=('eth_dst', 'eth_src', 'vlan_vid'),
         dec_ttl=True,
         vlan_port_scale=3.1,
@@ -110,7 +111,7 @@ ETH_SRC_DEFAULT_CONFIG = ValveTableConfig(
     next_tables=(('ipv4_fib', 'ipv6_fib') + _NEXT_VIP),
     match_types=(('eth_dst', True), ('eth_src', False), ('eth_type', False),
                  ('in_port', False), ('vlan_vid', False)),
-    set_fields=('vlan_vid', 'eth_dst'),
+    set_fields=('vlan_vid', 'eth_dst', 'metadata'),
     vlan_port_scale=4.1,
     )
 IPV4_FIB_DEFAULT_CONFIG = _fib_table(4, ETH_SRC_DEFAULT_CONFIG.table_id + 1)
