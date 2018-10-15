@@ -25,12 +25,26 @@ class RouteServer(object):
         self.recv_q = eventlet.queue.Queue(128)
         self.valves = valves
         self.send_flow_msgs = send_flow_msgs
-        self.routers = {}
         self.peers = {}
         self.peer_state = {}
         self.router_to_peers = {}
         self.intra_ins = {}
         self.intra_outs = {}
+
+        self.routers = self._routers(valves)
+        for routerid, router in self.routers.items():
+            self.register_router(routerid, router)
+
+    @staticmethod
+    def _routers(valves):
+        """Return a dict of bgp routers, keyed by bgp_routerid that are configured in all Valves."""
+        routers = {}
+        if valves:
+            for valve in list(valves.values()):
+                routers.update([
+                        (router.router_id, router)
+                        for router in valve.dp.routers.values() if router.router_id])
+        return routers
 
     def _send_loop(self):
         while self.running:
@@ -110,8 +124,13 @@ class RouteServer(object):
         self.routers[router_id] = router
         self.router_to_peers[router_id] = set()
 
-    def register_peer(self, peer_ip, peer_as, local_ip, attachment):
+    def register_peer(self, peer_ip, peer_as, vlan, attachment):
         """Register a peer to the route server."""
+        router = [rt for rt in self.routers.values() if vlan in rt.vlans]
+        if len(router) == 0:
+            return
+        router = router[0]
+        local_ip = router.router_id
         if peer_ip not in self.peers:
             self.pathid += 1
             pathid = self.pathid
@@ -124,6 +143,8 @@ class RouteServer(object):
                 local_ip=local_ip))
 
     def notify_peer_state(self, peer_ip, state):
+        if peer_ip not in self.peers:
+            return
         peer = self.peers[peer_ip]
         self.peers[peer_ip] = peer._replace(state = state)
         self.notify_peer_link_state(peer_ip, state)
@@ -230,12 +251,13 @@ class RouteServer(object):
         if local is true, the nexthop is an external host, otherwise it is another faucet.
         """
         valve = self.valves[vlan.dp_id]
-        assert local, 'non-local path is not supported'
+        if not local or pathid is not None:
+            print('non-local path and/or multipath is not supported')
+            return
         print('adding new route', prefix, nexthop, pathid, local)
         prefix = ipaddress.ip_network(prefix)
         nexthop = ipaddress.ip_address(nexthop)
-        flowmods = valve.add_route(vlan, nexthop, prefix, pathid)
-        print('flowmods', len(flowmods))
+        flowmods = valve.add_route(vlan, nexthop, prefix)
         if flowmods:
             self.send_flow_msgs(valve, flowmods)
 
@@ -252,8 +274,7 @@ class RouteServer(object):
     def _advertise(self, vlan, peer_ip, prefix, pathid, attributes):
         """Advertise a route to this peer."""
         print('advertse a path to peer')
-        ip_gw = vlan.vip_for_host(ipaddress.ip_address(peer_ip), pathid)
-        print('get ip_gw', ip_gw)
+        #ip_gw = vlan.vip_for_host(ipaddress.ip_address(peer_ip), pathid)
         # TODO: send an announcement to peer
 
     def router_up(self, router_id):
