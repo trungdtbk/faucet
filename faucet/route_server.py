@@ -8,7 +8,7 @@ eventlet.monkey_patch()
 from ryu.lib.hub import StreamClient
 
 Peer = collections.namedtuple('Peer',
-            ['peer_ip', 'peer_as', 'local_ip', 'pathid', 'attachment', 'state'])
+            ['peer_ip', 'peer_as', 'local_ip', 'pathid', 'attachment', 'state', 'vlan'])
 
 class RouteServer(object):
     """Provide APIs to communication with the route server."""
@@ -117,7 +117,7 @@ class RouteServer(object):
             self.router_up(router_id)
         for peer in self.peers.values():
             self.register_peer(
-                peer.peer_ip, peer.peer_as, peer.local_ip, peer.attachment)
+                peer.peer_ip, peer.peer_as, peer.vlan, peer.attachment)
 
     def register_router(self, router_id, router):
         """Register a router to the route server."""
@@ -134,7 +134,8 @@ class RouteServer(object):
         if peer_ip not in self.peers:
             self.pathid += 1
             pathid = self.pathid
-            self.peers[peer_ip] = Peer(peer_ip, peer_as, local_ip, pathid, attachment, 'down')
+            self.peers[peer_ip] = Peer(
+                    peer_ip, peer_as, local_ip, pathid, attachment, 'down', vlan)
             self.router_to_peers[local_ip].add(peer_ip)
         self.send(dict(
                 msg_type='peer_up',
