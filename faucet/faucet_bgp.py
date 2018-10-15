@@ -28,7 +28,7 @@ from ryu.lib import hub # pylint: disable=wrong-import-position
 from beka.beka import Beka # pylint: disable=wrong-import-position
 
 from faucet.valve_util import kill_on_exception
-
+from faucet.route_server import RouteServer
 
 class BgpSpeakerKey:
     """Uniquely describe a BGP speaker."""
@@ -65,6 +65,7 @@ class FaucetBgp:
         self._dp_bgp_speakers = {}
         self._dp_bgp_rib = {}
         self._valves = None
+        self.route_server = None
 
     def _valve_vlan(self, dp_id, vlan_vid):
         valve = None
@@ -86,11 +87,13 @@ class FaucetBgp:
     @kill_on_exception(exc_logname)
     def _bgp_up_handler(self, remote_ip, remote_as):
         self.logger.info('BGP peer router ID %s AS %s up' % (remote_ip, remote_as))
+        self.route_server.notify_peer_state(str(remote_ip), 'up')
 
     @kill_on_exception(exc_logname)
     def _bgp_down_handler(self, remote_ip, remote_as):
         self.logger.info('BGP peer router ID %s AS %s down' % (remote_ip, remote_as))
         # TODO: delete RIB routes for down peer.
+        self.route_server.notify_peer_state(str(remote_ip), 'down')
 
     @kill_on_exception(exc_logname)
     def _bgp_route_handler(self, path_change, bgp_speaker_key):
@@ -104,6 +107,7 @@ class FaucetBgp:
         valve, vlan = self._valve_vlan(dp_id, vlan_vid)
         if vlan is None:
             return
+        self.route_server.notify_route_change(path_change)
         prefix = ipaddress.ip_network(str(path_change.prefix))
         if bgp_speaker_key not in self._dp_bgp_rib:
             self._dp_bgp_rib[bgp_speaker_key] = {}
@@ -172,10 +176,12 @@ class FaucetBgp:
         for ip_dst, ip_gw in self._vlan_prefixes_by_ipv(vlan, bgp_speaker_key.ipv):
             beka.add_route(prefix=str(ip_dst), next_hop=str(ip_gw))
         for bgp_neighbor_address in vlan.bgp_neighbor_addresses_by_ipv(bgp_speaker_key.ipv):
+            peer_ip = str(bgp_neighbor_address)
+            peer_as = vlan.bgp_neighbor_as
             beka.add_neighbor(
-                connect_mode=vlan.bgp_connect_mode,
-                peer_ip=str(bgp_neighbor_address),
-                peer_as=vlan.bgp_neighbor_as)
+                connect_mode=vlan.bgp_connect_mode, peer_ip=peer_ip, peer_as=peer_as)
+            self.route_server.register_peer(
+                    peer_ip, peer_as, vlan, bgp_speaker_key)
         hub.spawn(beka.run)
         return beka
 
@@ -187,6 +193,8 @@ class FaucetBgp:
 
     def reset(self, valves):
         """Set up a BGP speaker for every VLAN that requires it."""
+        self.route_server = RouteServer(self.logger, valves, self._send_flow_msgs)
+        hub.spawn(self.route_server.run)
         # TODO: port status changes should cause us to withdraw a route.
         new_dp_bgp_speakers = {}
         for bgp_vlan in self._bgp_vlans(valves):
