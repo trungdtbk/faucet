@@ -26,13 +26,16 @@ class Router(Conf):
 
     defaults = {
         'vlans': None,
+        'router_id': None,
     }
 
     defaults_types = {
         'vlans': list,
+        'router_id': str,
     }
 
     def __init__(self, _id, dp_id, conf):
+        self.router_id = None
         self.vlans = []
         self.vip_map_by_ipv = {}
         super(Router, self).__init__(_id, dp_id, conf)
