@@ -76,6 +76,15 @@ class EventFaucetFastAdvertise(event.EventBase): # pylint: disable=too-few-publi
     pass
 
 
+class GroupNotifier():
+
+    def __init__(self, notifiers):
+        self.notifiers = notifiers
+
+    def notify(self, *args, **kwargs):
+        for notifier in self.notifiers:
+            notifier.notify(*args, **kwargs)
+
 
 class Faucet(RyuAppBase):
     """A RyuApp that implements an L2/L3 learning VLAN switch.
@@ -111,8 +120,11 @@ class Faucet(RyuAppBase):
             self.logger, self.exc_logname, self.metrics, self._send_flow_msgs)
         self.dot1x = faucet_dot1x.FaucetDot1x(
             self.logger, self.metrics, self._send_flow_msgs)
-        self.notifier = faucet_experimental_event.FaucetExperimentalEventNotifier(
-            self.get_setting('EVENT_SOCK'), self.metrics, self.logger)
+        self.notifier = GroupNotifier([
+                    faucet_experimental_event.FaucetExperimentalEventNotifier(
+                        self.get_setting('EVENT_SOCK'), self.metrics, self.logger),
+                    self.bgp])
+
         self.valves_manager = valves_manager.ValvesManager(
             self.logname, self.logger, self.metrics, self.notifier, self.bgp,
             self.dot1x, self._send_flow_msgs)
@@ -127,9 +139,11 @@ class Faucet(RyuAppBase):
         self.metrics.start(prom_port, prom_addr)
 
         # Start event notifier
-        notifier_thread = self.notifier.start()
-        if notifier_thread is not None:
-            self.threads.append(notifier_thread)
+        for notifier in self.notifier.notifiers:
+            if hasattr(notifier, 'start'):
+                notifier_thread = notifier.start()
+                if notifier_thread is not None:
+                    self.threads.append(notifier_thread)
 
         for service_event, service_pair in list(self._VALVE_SERVICES.items()):
             _, interval = service_pair
