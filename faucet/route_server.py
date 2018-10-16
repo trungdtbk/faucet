@@ -8,7 +8,8 @@ eventlet.monkey_patch()
 from ryu.lib.hub import StreamClient
 
 Peer = collections.namedtuple('Peer',
-            ['peer_ip', 'peer_as', 'local_ip', 'pathid', 'attachment', 'state', 'vlan'])
+            ['peer_ip', 'peer_as', 'local_ip', 'pathid', 'attachment', 'state',
+             'vlan', 'dp', 'port'])
 
 class RouteServer(object):
     """Provide APIs to communication with the route server."""
@@ -135,13 +136,15 @@ class RouteServer(object):
             self.pathid += 1
             pathid = self.pathid
             self.peers[peer_ip] = Peer(
-                    peer_ip, peer_as, local_ip, pathid, attachment, 'down', vlan)
+                    peer_ip, peer_as, local_ip, pathid, attachment, 'down', vlan, None, None)
             self.router_to_peers[local_ip].add(peer_ip)
+        peer = self.peers[peer_ip]
         self.send(dict(
                 msg_type='peer_up',
-                peer_ip=peer_ip,
-                peer_as=peer_as,
-                local_ip=local_ip))
+                peer_ip=peer.peer_ip,
+                peer_as=peer.peer_as,
+                local_ip=peer.local_ip))
+        self._notify_peer_info_change(peer_ip, change={'pathid': peer.pathid})
 
     def notify_peer_state(self, peer_ip, state):
         if peer_ip not in self.peers:
@@ -332,14 +335,27 @@ class RouteServer(object):
     def link_down(self, fauct1, facuet2):
         self.link_state_change(src=dict(router_id=faucet1), dst=dict(router_id=faucet2), state='down')
 
-    def notify_link_change(self, src, dst, change):
+    def _notify_link_change(self, src, dst, change):
         self.send(dict(msg_type='link_state_change', src=src, dst=dst, attributes=change))
 
-    def notify_peer_link_state(self, peer_ip, state):
+    def _notify_peer_info_change(self, peer_ip, change):
+        if peer_ip not in self.peers:
+            return
+        actual_change = {}
         peer = self.peers[peer_ip]
+        for key, value in change.items():
+            if hasattr(peer, key) and getattr(peer, key) != value and value:
+                actual_change[key] = value
+                peer = peer._replace(**{key:value})
+        if not actual_change:
+            return
         for src, dst in [
                 ({'router_id': peer.local_ip}, {'peer_ip': peer_ip}),
                 ({'peer_ip': peer_ip}, {'router_id': peer.local_ip})]:
-            self.notify_link_change(src, dst, {'pathid': peer.pathid, 'state': state})
+            self._notify_link_change(src, dst, change)
 
+    def notify_peer_link_state(self, peer_ip, state):
+        self._notify_peer_info_change(peer_ip, {'state': state})
 
+    def notify_peer_physical_link(self, peer_ip, dp_name, port_name):
+        self._notify_peer_info_change(peer_ip, {'dp': dp_name, 'port': port_name})

@@ -244,3 +244,17 @@ class FaucetBgp:
                     **neighbor_labels).set(neighbor_state['info']['uptime'])
                 self.metrics.bgp_neighbor_routes.labels( # pylint: disable=no-member
                     **dict(neighbor_labels, ipv=ipv)).set(vlan.route_count_by_ipv(ipv))
+
+    def notify(self, dp_id, dp_name, event_dict):
+        """Receive host related event from Valve."""
+        if 'L2_LEARN' in event_dict:
+            l3_src_ip = event_dict['L2_LEARN'].get('l3_src_ip', None)
+            l3_dst_ip = event_dict['L2_LEARN'].get('l3_dst_ip', None)
+            port_no = event_dict['L2_LEARN']['port_no']
+            valve = self._valves[dp_id]
+            port_name = valve.dp.ports[port_no].name
+            vlan_vid = event_dict['L2_LEARN']['vid']
+            if not (l3_src_ip and l3_dst_ip):
+                return
+            self.route_server.notify_peer_physical_link(l3_src_ip, dp_name, port_name)
+
