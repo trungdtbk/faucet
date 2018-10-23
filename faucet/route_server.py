@@ -8,8 +8,8 @@ eventlet.monkey_patch()
 from ryu.lib.hub import StreamClient
 
 Peer = collections.namedtuple('Peer',
-            ['peer_ip', 'peer_as', 'local_ip', 'pathid', 'attachment', 'state',
-             'vlan', 'dp', 'port'])
+        ['peer_ip', 'peer_as', 'local_ip', 'bgp_speaker_key', 'vlan', 'state'])
+Nexthop = collections.namedtuple('Nexthop', ['nexthop', 'dp', 'port', 'vlan', 'state', 'pathid'])
 
 class RouteServer(object):
     """Provide APIs to communication with the route server."""
@@ -27,10 +27,12 @@ class RouteServer(object):
         self.valves = valves
         self.send_flow_msgs = send_flow_msgs
         self.peers = {}
-        self.peer_state = {}
         self.router_to_peers = {}
+        self.routes = {}
+        self.nexthops = {}
         self.intra_ins = {}
         self.intra_outs = {}
+        self.connected = False
 
         self.routers = self._routers(valves)
         for routerid, router in self.routers.items():
@@ -92,6 +94,7 @@ class RouteServer(object):
                             break
                     except:
                         self.logger.error('connection to route server is lost')
+                        self.connected = False
                         self.socket.close()
                         traceback.print_exc()
                         break
@@ -114,18 +117,23 @@ class RouteServer(object):
             self.mapping_handler(event)
 
     def server_connected(self):
+        self.connected = True
         for router_id in self.routers.keys():
             self.router_up(router_id)
         for peer in self.peers.values():
-            self.register_peer(
-                peer.peer_ip, peer.peer_as, peer.vlan, peer.attachment)
+            if peer.state == 'up':
+                self.peer_up(peer.peer_ip)
+            else:
+                self.peer_down(peer.peer_ip)
+        for nexthop, nh_obj in self.nexthops.items():
+            self.nexthop_up(nexthop, nh_obj.dp, nh_obj.port, nh_obj.vlan, nh_obj.pathid)
 
     def register_router(self, router_id, router):
         """Register a router to the route server."""
         self.routers[router_id] = router
         self.router_to_peers[router_id] = set()
 
-    def register_peer(self, peer_ip, peer_as, vlan, attachment):
+    def register_peer(self, peer_ip, peer_as, vlan, bgp_speaker_key):
         """Register a peer to the route server."""
         router = [rt for rt in self.routers.values() if vlan in rt.vlans]
         if len(router) == 0:
@@ -133,42 +141,11 @@ class RouteServer(object):
         router = router[0]
         local_ip = router.router_id
         if peer_ip not in self.peers:
-            self.pathid += 1
-            pathid = self.pathid
             self.peers[peer_ip] = Peer(
-                    peer_ip, peer_as, local_ip, pathid, attachment, 'down', vlan, None, None)
+                    peer_ip=peer_ip, peer_as=peer_as, local_ip=local_ip,
+                    bgp_speaker_key=bgp_speaker_key, vlan=vlan, state='down')
             self.router_to_peers[local_ip].add(peer_ip)
-        peer = self.peers[peer_ip]
-        self.send(dict(
-                msg_type='peer_up',
-                peer_ip=peer.peer_ip,
-                peer_as=peer.peer_as,
-                local_ip=peer.local_ip))
-        self._notify_peer_info_change(peer_ip, change={'pathid': peer.pathid})
-
-    def notify_peer_state(self, peer_ip, state):
-        if peer_ip not in self.peers:
-            return
-        peer = self.peers[peer_ip]
-        self.peers[peer_ip] = peer._replace(state = state)
-        self.notify_peer_link_state(peer_ip, state)
-
-    def notify_route_change(self, path_change):
-        peer_ip = str(path_change.neighbor)
-        if peer_ip is None:
-            return
-        prefix = str(path_change.prefix)
-        if path_change.is_withdraw:
-            self.send(dict(msg_type='route_down', peer_ip=peer_ip, prefix=prefix))
-        else:
-            self.send(event=dict(
-                msg_type='route_up',
-                peer_ip=peer_ip,
-                prefix=prefix,
-                next_hop=str(path_change.next_hop),
-                as_path=path_change.as_path,
-                origin=path_change.origin,
-                ))
+            self.routes[peer_ip] = collections.defaultdict(set)
 
     def mapping_handler(self, mapping):
         """A mapping informs about a route and how it can be used
@@ -285,77 +262,97 @@ class RouteServer(object):
         router = self.routers[router_id]
         event = dict(
                 msg_type='router_up',
-                router_id=router_id,
+                routerid=router_id,
                 name=router._id)
         self.send(event)
 
     def router_down(self, router_id):
-        self.send(dict(msg_type='router_down', router_id=router_id))
-
-    def peer_connected(self, peer_ip, dp_name, dp_id, port_no, vlan_vid):
-        #self.peers[peer_ip] = (dp_name, dp_id, port_no, vlan_vid)
-        self.peer_link_state_change(peer_ip, 'up')
+        self.send(dict(msg_type='router_down', routerid=router_id))
 
     def peer_up(self, peer_ip):
+        if peer_ip not in self.peers:
+            return
         peer = self.peers[peer_ip]
-        event = dict(
+        self.peers[peer_ip] = peer._replace(state = 'up')
+        self.send(dict(
                 msg_type='peer_up',
                 peer_ip=peer.peer_ip,
                 peer_as=peer.peer_as,
-                local_ip=peer.local_ip)
-        self.send(event)
-        self.peer_link_state_change(peer_ip, 'up')
+                local_ip=peer.local_ip))
 
     def peer_down(self, peer_ip):
-        event = dict(msg_type='peer_down', peer_ip=peer_ip)
-        self.send(event)
-        self.peer_link_state_change(peer_ip, 'down')
-
-    def route_update(self, path_change):
-        peer_ip = str(path_change.neighbor)
-        if peer_ip is None:
-            return
-        prefix = str(path_change.prefix)
-        if path_change.is_withdraw:
-            self.send(dict(msg_type='route_down', peer_ip=peer_ip, prefix=prefix))
-        else:
-            self.send(event=dict(
-                msg_type='route_up',
-                peer_ip=peer_ip,
-                prefix=prefix,
-                next_hop=str(path_change.next_hop),
-                as_path=path_change.as_path,
-                origin=path_change.origin,
-                ))
-
-    def link_up(self, faucet1, faucet2):
-        """ Link between two Faucets is up """
-        self.link_state_change(src=dict(router_id=faucet1), dst=dict(router_id=faucet2), state='up')
-
-    def link_down(self, fauct1, facuet2):
-        self.link_state_change(src=dict(router_id=faucet1), dst=dict(router_id=faucet2), state='down')
-
-    def _notify_link_change(self, src, dst, change):
-        self.send(dict(msg_type='link_state_change', src=src, dst=dst, attributes=change))
-
-    def _notify_peer_info_change(self, peer_ip, change):
         if peer_ip not in self.peers:
             return
-        actual_change = {}
         peer = self.peers[peer_ip]
-        for key, value in change.items():
-            if hasattr(peer, key) and getattr(peer, key) != value and value:
-                actual_change[key] = value
-                peer = peer._replace(**{key:value})
-        if not actual_change:
+        self.peers[peer_ip] = peer._replace(state = 'down')
+        self.send(dict(msg_type='peer_down', peer_ip=peer_ip))
+        for prefix, nexthops in self.routes[peer_ip].items():
+            for nexthop in nexthops:
+                self.route_down(peer_ip, nexthop, prefix)
+        self.routes[peer_ip] = collections.defaultdict(set)
+
+    def route_up(self, peer_ip, nexthop, prefix, as_path, origin):
+        self.send(dict(msg_type='route_up', peer_ip=peer_ip, prefix=prefix,
+                       next_hop=nexthop, as_path=as_path, origin=origin))
+
+    def route_down(self, peer_ip, nexthop, prefix):
+        self.send(dict(msg_type='route_down', peer_ip=peer_ip, prefix=prefix, next_hop=nexthop))
+
+    def notify_route_change(self, path_change):
+        peer_ip = path_change.neighbor
+        prefix = path_change.prefix
+        if not (peer_ip and prefix):
             return
-        for src, dst in [
-                ({'router_id': peer.local_ip}, {'peer_ip': peer_ip}),
-                ({'peer_ip': peer_ip}, {'router_id': peer.local_ip})]:
-            self._notify_link_change(src, dst, change)
+        peer_ip = str(peer_ip)
+        prefix = str(prefix)
+        if path_change.is_withdraw:
+            nexthop = path_change.next_hop
+            nexthops = []
+            if nexthop:
+                nexthops.append(str(nexthop))
+            else:
+                nexthops.extend(self.routes[peer_ip][prefix])
+            for nexthop in nexthops:
+                self.routes[peer_ip][prefix].discard(nexthop)
+                self.route_down(peer_ip, nexthop, prefix)
+        else:
+            nexthop = str(path_change.next_hop)
+            self.routes[peer_ip][prefix].add(nexthop)
+            self.route_up(peer_ip, nexthop, prefix, path_change.as_path, path_change.origin)
 
-    def notify_peer_link_state(self, peer_ip, state):
-        self._notify_peer_info_change(peer_ip, {'state': state})
+    def notify_link_up(self, router1, router2, dp_name=None, port_name=None, vlan_vid=None):
+        """ Link between two Faucets is up """
+        self.send({'msg_type': 'link_up', 'src': router1, 'dst': router2,
+                   'attributes': {'dp': dp_name, 'port': port_name, 'vlan': vlan_vid}})
 
-    def notify_peer_physical_link(self, peer_ip, dp_name, port_name):
-        self._notify_peer_info_change(peer_ip, {'dp': dp_name, 'port': port_name})
+    def notify_link_down(self, router1, router2):
+        self.send({'msg_type': 'link_down', 'src': router1, 'dst': router2})
+
+    def nexthop_up(self, nexthop, dp_name, port_name, vlan_vid, pathid):
+        for router in self.routers.values():
+            for vlan in router.vlans:
+                if vlan.vid == vlan_vid:
+                    self.send(dict(msg_type='nexthop_up', routerid=router.router_id, pathid=pathid,
+                              nexthop=nexthop, dp=dp_name, port=port_name, vlan=vlan_vid))
+                    return
+
+    def notify_nexthop_connected(self, nexthop, dp_name, port_name, vlan_vid):
+        nexthop = str(nexthop)
+        if nexthop not in self.nexthops:
+            self.pathid += 1
+            pathid = self.pathid
+            self.nexthops[nexthop] = Nexthop(nexthop=nexthop, dp=dp_name, port=port_name,
+                                             vlan=vlan_vid, state='up', pathid=self.pathid)
+        else:
+            nexthop_ = self.nexthops[nexthop]
+            if (nexthop_.dp == dp_name
+                    and nexthop_.port == port_name
+                    and nexthop_.vlan == vlan_vid):
+                return
+            for key, value in [('dp', dp_name), ('port', port_name), ('vlan', vlan_vid), ('state', 'up')]:
+                nexthop_ = nexthop_._replace(**{key: value})
+            self.nexthops[nexthop] = nexthop_
+            pathid = nexthop_.pathid
+        self.nexthop_up(nexthop, dp_name, port_name, vlan_vid, pathid)
+
+

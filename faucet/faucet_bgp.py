@@ -87,13 +87,13 @@ class FaucetBgp:
     @kill_on_exception(exc_logname)
     def _bgp_up_handler(self, remote_ip, remote_as):
         self.logger.info('BGP peer router ID %s AS %s up' % (remote_ip, remote_as))
-        self.route_server.notify_peer_state(str(remote_ip), 'up')
+        self.route_server.peer_up(str(remote_ip))
 
     @kill_on_exception(exc_logname)
     def _bgp_down_handler(self, remote_ip, remote_as):
         self.logger.info('BGP peer router ID %s AS %s down' % (remote_ip, remote_as))
         # TODO: delete RIB routes for down peer.
-        self.route_server.notify_peer_state(str(remote_ip), 'down')
+        self.route_server.peer_down(str(remote_ip))
 
     @kill_on_exception(exc_logname)
     def _bgp_route_handler(self, path_change, bgp_speaker_key):
@@ -180,8 +180,7 @@ class FaucetBgp:
             peer_as = vlan.bgp_neighbor_as
             beka.add_neighbor(
                 connect_mode=vlan.bgp_connect_mode, peer_ip=peer_ip, peer_as=peer_as)
-            self.route_server.register_peer(
-                    peer_ip, peer_as, vlan, bgp_speaker_key)
+            self.route_server.register_peer(peer_ip, peer_as, vlan, bgp_speaker_key)
         hub.spawn(beka.run)
         return beka
 
@@ -256,5 +255,8 @@ class FaucetBgp:
             vlan_vid = event_dict['L2_LEARN']['vid']
             if not (l3_src_ip and l3_dst_ip):
                 return
-            self.route_server.notify_peer_physical_link(l3_src_ip, dp_name, port_name)
+            self.route_server.notify_nexthop_connected(l3_src_ip, dp_name, port_name, vlan_vid)
+        elif 'L2_EXPIRE' in event_dict:
+            # TODO: handle nexthop disconnected
+            pass
 
