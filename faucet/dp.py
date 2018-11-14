@@ -894,8 +894,6 @@ configuration.
                 vlan_dps = [dp for dp in dps if vlan.vid in dp.vlans]
                 test_config_condition(len(vlan_dps) != 1, (
                     'DPs %s sharing a BGP speaker VLAN is unsupported'))
-            bgp_ports = {vlan.bgp_port for vlan in bgp_vlans}
-            test_config_condition(len(bgp_ports) != 1, 'BGP ports must all be the same')
             for vlan in bgp_vlans:
                 test_config_condition(vlan.bgp_server_addresses != (
                     bgp_vlans[0].bgp_server_addresses), (
