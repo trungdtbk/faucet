@@ -116,6 +116,11 @@ class FaucetBgp:
                     'BGP nexthop %s for prefix %s cannot be us',
                     nexthop, prefix)
                 return
+            if not vlan.ip_in_vip_subnet(nexthop):
+                self.logger.error(
+                    'BGP nexthop %s for prefix %s is not directly connected',
+                    nexthop, prefix)
+                return
 
         flowmods = []
         if path_change.is_withdraw:
