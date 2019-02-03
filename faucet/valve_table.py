@@ -54,7 +54,9 @@ class ValveTable: # pylint: disable=too-many-arguments,too-many-instance-attribu
                 next_table.name, self.name))
         return valve_of.goto_table(next_table)
 
-    def goto_this(self):
+    def goto_this(self, metadata=None, mask=None):
+        if metadata:
+            return valve_of.metadata_goto_table(metadata, mask, self)
         return valve_of.goto_table(self)
 
     def goto_miss(self, next_table):

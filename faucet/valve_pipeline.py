@@ -175,9 +175,9 @@ class ValvePipeline(ValveManagerBase):
             priority=self.filter_priority + priority_offset)]
 
     def select_packets(self, target_table, match_dict, actions=None,
-                       priority_offset=0):
+                       priority_offset=0, metadata=None, mask=None):
         """retrieve rules to redirect packets matching match_dict to table"""
-        inst = [target_table.goto_this()]
+        inst = [target_table.goto_this(metadata, mask)]
         if actions is not None:
             inst.append(valve_of.apply_actions(actions))
         return [self.classification_table.flowmod(
