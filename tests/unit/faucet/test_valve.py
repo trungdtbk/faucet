@@ -884,6 +884,27 @@ class ValveTestBases:
             # TODO: check del flows.
             self.assertTrue(route_del_replies)
 
+        def test_multipath_route(self):
+            """Test IPv4 multipath routes."""
+            for ip, mac in [('10.0.0.1', self.P1_V100_MAC), ('10.0.0.2', self.P2_V200_MAC)]:
+                arp_replies = self.rcv_packet(1, 0x100, {
+                    'eth_src': mac,
+                    'eth_dst': mac.BROADCAST_STR,
+                    'arp_code': arp.ARP_REQUEST,
+                    'arp_source_ip': ip,
+                    'arp_target_ip': '10.0.0.254'})
+                self.assertTrue(self.packet_outs_from_flows(arp_replies))
+            valve_vlan = self.valve.dp.vlans[0x100]
+            ip_dst = ipaddress.IPv4Network('10.100.100.0/24')
+            for pathid, ip_gw in [(None, '10.0.0.1'), (123, '10.0.0.2')]:
+                ip_gw = ipaddress.IPv4Address(ip_gw)
+                route_add_replies = self.valve.add_route(
+                    valve_vlan, ip_gw, ip_dst, pathid)
+                self.assertTrue(route_add_replies)
+                route_del_replies = self.valve.del_route(
+                    valve_vlan, ip_dst, pathid)
+                self.assertTrue(route_del_replies)
+
         def test_host_ipv4_fib_route(self):
             """Test learning a FIB rule for an IPv4 host."""
             fib_route_replies = self.rcv_packet(1, 0x100, {
