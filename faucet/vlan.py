@@ -438,16 +438,20 @@ class VLAN(Conf):
             self.dyn_route_gws_by_ipv[ip_gw.version].add(ip_gw)
             self.dyn_host_gws_by_ipv[ip_gw.version] -= set([ip_gw])
 
-    def add_route(self, ip_dst, ip_gw):
+    def add_route(self, ip_dst, ip_gw, pathid=None):
         """Add an IP route."""
+        if pathid:
+            ip_dst = (ip_dst, pathid)
         self.dyn_routes_by_ipv[ip_gw.version][ip_dst] = ip_gw
         if ip_gw not in self.dyn_gws_by_ipv[ip_gw.version]:
             self.dyn_gws_by_ipv[ip_gw.version][ip_gw] = set()
         self.dyn_gws_by_ipv[ip_gw.version][ip_gw].add(ip_dst)
         self._update_gw_types(ip_gw)
 
-    def del_route(self, ip_dst):
+    def del_route(self, ip_dst, pathid=None):
         """Delete an IP route."""
+        if pathid:
+            ip_dst = (ip_dst, pathid)
         ip_gw = self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
         del self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
         self.dyn_gws_by_ipv[ip_gw.version][ip_gw].remove(ip_dst)
