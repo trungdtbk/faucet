@@ -76,7 +76,8 @@ def _fib_table(ipv, table_id):
     return ValveTableConfig(
         'ipv%u_fib' % ipv,
         table_id,
-        match_types=(('eth_type', False), ('ipv%u_dst' % ipv, True), ('vlan_vid', False)),
+        match_types=(('eth_type', False), ('ipv%u_dst' % ipv, True),
+                     ('vlan_vid', False), ('metadata', True)),
         set_fields=('eth_dst', 'eth_src', 'vlan_vid'),
         dec_ttl=True,
         vlan_port_scale=3.1,
