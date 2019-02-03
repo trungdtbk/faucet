@@ -451,10 +451,12 @@ class VLAN(Conf):
     def del_route(self, ip_dst, pathid=None):
         """Delete an IP route."""
         if pathid:
-            ip_dst = (ip_dst, pathid)
-        ip_gw = self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
-        del self.dyn_routes_by_ipv[ip_dst.version][ip_dst]
-        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].remove(ip_dst)
+            dst = (ip_dst, pathid)
+        else:
+            dst = ip_dst
+        ip_gw = self.dyn_routes_by_ipv[ip_dst.version][dst]
+        del self.dyn_routes_by_ipv[ip_dst.version][dst]
+        self.dyn_gws_by_ipv[ip_gw.version][ip_gw].remove(dst)
         if not self.dyn_gws_by_ipv[ip_gw.version][ip_gw]:
             del self.dyn_gws_by_ipv[ip_gw.version][ip_gw]
         self._update_gw_types(ip_gw)
