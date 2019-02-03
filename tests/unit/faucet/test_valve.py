@@ -191,6 +191,9 @@ vlans:
         vid: 0x100
         targeted_gw_resolution: True
         faucet_vips: ['10.0.0.254/24']
+        faucet_ext_vips:
+            10.0.0.253: '0e:00:00:00:11:11'
+            10.0.0.252: '0e:00:00:00:22:22'
         routes:
             - route:
                 ip_dst: 10.99.99.0/24
@@ -886,14 +889,16 @@ class ValveTestBases:
 
         def test_multipath_route(self):
             """Test IPv4 multipath routes."""
-            for ip, mac in [('10.0.0.1', self.P1_V100_MAC), ('10.0.0.2', self.P2_V200_MAC)]:
-                arp_replies = self.rcv_packet(1, 0x100, {
-                    'eth_src': mac,
+            port = 1
+            for ip, mac_ in [('10.0.0.1', self.P1_V100_MAC), ('10.0.0.2', self.P2_V200_MAC)]:
+                arp_replies = self.rcv_packet(port, 0x100, {
+                    'eth_src': mac_,
                     'eth_dst': mac.BROADCAST_STR,
                     'arp_code': arp.ARP_REQUEST,
                     'arp_source_ip': ip,
                     'arp_target_ip': '10.0.0.254'})
                 self.assertTrue(self.packet_outs_from_flows(arp_replies))
+                port += 1
             valve_vlan = self.valve.dp.vlans[0x100]
             ip_dst = ipaddress.IPv4Network('10.100.100.0/24')
             for pathid, ip_gw in [(None, '10.0.0.1'), (123, '10.0.0.2')]:

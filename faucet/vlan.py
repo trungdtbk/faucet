@@ -88,6 +88,8 @@ class VLAN(Conf):
         'acl_in': None,
         'acls_in': None,
         'faucet_vips': None,
+        'faucet_ext_vips': None,
+        # extra VIPs used for multi-path routing
         'faucet_mac': FAUCET_MAC,
         # set MAC for FAUCET VIPs on this VLAN
         'unicast_flood': True,
@@ -123,6 +125,7 @@ class VLAN(Conf):
         'acl_in': (int, str),
         'acls_in': list,
         'faucet_vips': list,
+        'faucet_ext_vips': dict,
         'faucet_mac': str,
         'unicast_flood': bool,
         'bgp_as': int,
@@ -162,6 +165,7 @@ class VLAN(Conf):
         self.dp_id = None
         self.faucet_mac = None
         self.faucet_vips = None
+        self.faucet_ext_vips = None
         self.max_hosts = None
         self.minimum_ip_size_check = None
         self.reserved_internal_vlan = None
@@ -191,6 +195,7 @@ class VLAN(Conf):
         self.dyn_oldest_host_time = None
         self.dyn_last_updated_metrics_sec = None
 
+        self.dyn_vip_to_pathid = {}
         self.dyn_routes_by_ipv = collections.defaultdict(dict)
         self.dyn_gws_by_ipv = collections.defaultdict(dict)
         self.dyn_host_gws_by_ipv = collections.defaultdict(set)
@@ -203,6 +208,7 @@ class VLAN(Conf):
         self._set_default('vid', self._id)
         self._set_default('name', str(self._id))
         self._set_default('faucet_vips', [])
+        self._set_default('faucet_ext_vips', {})
         self._set_default('bgp_neighbor_as', self.bgp_neighbour_as)
         self._set_default(
             'bgp_neighbor_addresses', self.bgp_neighbour_addresses)
@@ -237,6 +243,11 @@ class VLAN(Conf):
         if self.faucet_vips:
             self.faucet_vips = frozenset([
                 self._check_ip_str(ip_str, ip_method=ipaddress.ip_interface) for ip_str in self.faucet_vips])
+
+        if self.faucet_ext_vips:
+            self.faucet_ext_vips = dict([
+                (self._check_ip_str(ip_str, ip_method=ipaddress.ip_address), mac_str)
+                for ip_str, mac_str in self.faucet_ext_vips.items()])
 
         if self.bgp_neighbor_addresses or self.bgp_neighbour_addresses:
             neigh_addresses = frozenset(self.bgp_neighbor_addresses + self.bgp_neighbour_addresses)
@@ -656,6 +667,9 @@ class VLAN(Conf):
                 result['routes'] = [{'route': route} for route in self.routes]
             if self.faucet_vips:
                 result['faucet_vips'] = [str(vip) for vip in self.faucet_vips]
+            if self.faucet_ext_vips:
+                result['faucet_ext_vips'] = dict(
+                    [(str(ip), str(mac)) for ip, mac in self.faucet_ext_vips.items()])
             if self.bgp_neighbor_addresses:
                 result['bgp_neighbor_addresses'] = [str(vip) for vip in self.bgp_neighbor_addresses]
             if self.bgp_server_addresses:
