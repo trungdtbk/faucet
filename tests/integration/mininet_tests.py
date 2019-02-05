@@ -845,6 +845,9 @@ vlans:
     100:
         description: "untagged"
         faucet_vips: ["10.0.0.254/24"]
+        faucet_ext_vips:
+            10.0.0.253: '0e:00:00:00:00:11'
+            10.0.0.252: '0e:00:00:00:00:22'
         routes:
             - route:
                 ip_dst: "10.0.1.0/24"
@@ -868,6 +871,15 @@ vlans:
         self._set_var_path('faucet', 'API_TEST_RESULT', 'result.txt')
         self.results_file = self.env['faucet']['API_TEST_RESULT']
 
+    def verify_routing(self):
+        first_host, second_host = self.net.hosts[:2]
+        # no change to the default fib (ip_dst=10.0.1.0/24, ip_gw=h1) should be made
+        self.wait_for_route_as_flow(
+            first_host.MAC(), ipaddress.ip_network('10.0.1.0/24'), vlan_vid=100)
+        # a fib (ip_dst=10.0.1.0/24, ip_gw=h2, metadata=1) should present
+        self.wait_for_route_as_flow(
+            second_host.MAC(), ipaddress.ip_network('10.0.1.0/24'), vlan_vid=100)
+
     def verify_api_call_log(self, timeout=10):
         result = None
         for _ in range(timeout):
@@ -883,6 +895,7 @@ vlans:
 
     def test_untagged(self):
         self.verify_api_call_log()
+        self.verify_routing()
 
 
 class FaucetUntaggedLogRotateTest(FaucetUntaggedTest):

@@ -38,6 +38,15 @@ class TestFaucetExperimentalAPIViaRyu(app_manager.RyuApp):
         except AssertionError as err:
             self._update_test_result(str(err))
 
+        self.test_route_api()
+
+    def test_route_api(self):
+        """Test route APIs."""
+        self.faucet_experimental_api.add_route(prefix='100.0.0.0/24', nexthop='10.0.0.1')
+        self.faucet_experimental_api.add_route(prefix='10.0.1.0/24', nexthop='10.0.0.2', pathid=1)
+        self.faucet_experimental_api.add_ext_vip('10.0.0.253', 1)
+        self.faucet_experimental_api.add_ext_vip('10.0.0.252', 2)
+
 
 class TestFaucetExperimentalAPI(unittest.TestCase): # pytype: disable=module-attr
     """Test methods for experimental API."""
