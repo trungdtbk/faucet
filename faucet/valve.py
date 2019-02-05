@@ -1476,6 +1476,14 @@ class Valve:
     def del_authed_mac(self, port_num, mac=None):
         return self.acl_manager.del_authed_mac(port_num, mac)
 
+    def add_ext_vip(self, vlan, vip, pathid):
+        route_manager = self._route_manager_by_ipv[vip.version]
+        return route_manager.add_faucet_ext_vip(vlan, vip, pathid)
+
+    def del_ext_vip(self, vlan, vip):
+        route_manager = self._route_manager_by_ipv[vip.version]
+        return route_manager.del_faucet_ext_vip(vlan, vip)
+
     def add_route(self, vlan, ip_gw, ip_dst, pathid=None):
         """Add route to VLAN routing table."""
         route_manager = self._route_manager_by_ipv[ip_dst.version]

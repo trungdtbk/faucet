@@ -275,6 +275,31 @@ class ValveRouteManager(ValveManagerBase):
     def _global_routing(self):
         return self.global_vlan.vid and self.routers and len(self.routers) == 1
 
+    def add_faucet_ext_vip(self, vlan, vip, pathid):
+        ofmsgs = []
+        if vip not in vlan.faucet_ext_vips:
+            return []
+        if vip not in vlan.dyn_vip_to_pathid:
+            ext_mac = vlan.faucet_ext_vips[vip]
+            vlan.dyn_vip_to_pathid[vip] = pathid
+            ofmsgs.extend(self.pipeline.select_packets(
+                self.fib_table,
+                {'eth_type': self.ETH_TYPE, 'eth_dst': ext_mac, 'vlan': vlan},
+                actions=None,
+                metadata=pathid
+                ))
+        return ofmsgs
+
+    def del_faucet_ext_vip(self, vlan, vip):
+        ofmsgs = []
+        if vip not in vlan.dyn_vip_to_pathid:
+            return []
+        pathid = vlan.dyn_vip_to_pathid[vip]
+        ofmsgs.extend(self.pipeline.remove_filter(
+            {'eth_type': self.ETH_TYPE, 'eth_dst': vlan.faucet_ext_vips[vip], 'vlan': vlan},
+            strict=True))
+        return ofmsgs
+
     def _add_faucet_fib_to_vip(self, vlan, priority, faucet_vip, faucet_vip_host):
         ofmsgs = []
         learn_connected_priority = self.route_priority + faucet_vip.network.prefixlen
