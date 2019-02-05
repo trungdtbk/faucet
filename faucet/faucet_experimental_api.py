@@ -98,7 +98,7 @@ class FaucetExperimentalAPI:
             return [valves[dpid]]
         return valves.values()
 
-    def modify_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None, add=True):
+    def modify_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None, add=True): # pylint: disable=too-many-arguments
         """Add/del a route from a given DP and VLAN or all DPs if not specified."""
         prefix = ipaddress.ip_network(str(prefix))
         nexthop = ipaddress.ip_address(str(nexthop))
@@ -113,17 +113,17 @@ class FaucetExperimentalAPI:
                 ofmsgs = method(vlan, ip_dst=prefix, ip_gw=nexthop, pathid=pathid)
                 if ofmsgs:
                     valve_ofmsgs[valve] = ofmsgs
-        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs)
+        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs) # pylint: disable=protected-access
 
-    def add_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None):
+    def add_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None): # pylint: disable=too-many-arguments
         """Add a route from a given DP and VLAN or all DPs if not specified."""
         self.modify_route(prefix, nexthop, dpid, vid, pathid)
 
-    def del_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None):
+    def del_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None): # pylint: disable=too-many-arguments
         """Delete a route from a given DP and VLAN or all DPs if not specified."""
         self.modify_route(prefix, nexthop, dpid, vid, pathid, False)
 
-    def modify_ext_vip(self, vip, pathid, dpid=None, vid=None, add=True):
+    def modify_ext_vip(self, vip, pathid, dpid=None, vid=None, add=True): # pylint: disable=too-many-arguments
         """Add/del a VIP from the classification table for a given DP and VLAN."""
         vip = ipaddress.ip_address(str(vip))
         valve_ofmsgs = {}
@@ -137,7 +137,7 @@ class FaucetExperimentalAPI:
                 ofmsgs = method(vlan, vip, pathid)
                 if ofmsgs:
                     valve_ofmsgs[valve] = ofmsgs
-        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs)
+        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs) # pylint: disable=protected-access
 
     def add_ext_vip(self, vip, pathid, dpid=None, vid=None):
         """Add a VIP from the classification table for a given DP and VLAN."""
