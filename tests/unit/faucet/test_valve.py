@@ -887,29 +887,6 @@ class ValveTestBases:
             # TODO: check del flows.
             self.assertTrue(route_del_replies)
 
-        def test_multipath_route(self):
-            """Test IPv4 multipath routes."""
-            port = 1
-            for ip, mac_ in [('10.0.0.1', self.P1_V100_MAC), ('10.0.0.2', self.P2_V200_MAC)]:
-                arp_replies = self.rcv_packet(port, 0x100, {
-                    'eth_src': mac_,
-                    'eth_dst': mac.BROADCAST_STR,
-                    'arp_code': arp.ARP_REQUEST,
-                    'arp_source_ip': ip,
-                    'arp_target_ip': '10.0.0.254'})
-                self.assertTrue(self.packet_outs_from_flows(arp_replies))
-                port += 1
-            valve_vlan = self.valve.dp.vlans[0x100]
-            ip_dst = ipaddress.IPv4Network('10.100.100.0/24')
-            for pathid, ip_gw in [(None, '10.0.0.1'), (123, '10.0.0.2')]:
-                ip_gw = ipaddress.IPv4Address(ip_gw)
-                route_add_replies = self.valve.add_route(
-                    valve_vlan, ip_gw, ip_dst, pathid)
-                self.assertTrue(route_add_replies)
-                route_del_replies = self.valve.del_route(
-                    valve_vlan, ip_dst, pathid)
-                self.assertTrue(route_del_replies)
-
         def test_host_ipv4_fib_route(self):
             """Test learning a FIB rule for an IPv4 host."""
             fib_route_replies = self.rcv_packet(1, 0x100, {
@@ -2728,6 +2705,83 @@ vlans:
 
     def setUp(self):
         self.setup_valve(self.CONFIG)
+
+
+class ValveMultipathRoutingTest(ValveTestBases.ValveTestSmall):
+
+    CONFIG = """
+dps:
+    s1:
+        hardware: 'Open vSwitch'
+%s
+        interfaces:
+            p1:
+                number: 1
+                native_vlan: v100
+            p2:
+                number: 2
+                native_vlan: v200
+            p3:
+                number: 3
+                tagged_vlans: [v100, v200]
+            p4:
+                number: 4
+                tagged_vlans: [v200]
+
+routers:
+    router1:
+        vlans: [v100, v200]
+vlans:
+    v100:
+        vid: 0x100
+        targeted_gw_resolution: True
+        faucet_vips: ['10.0.0.254/24']
+        faucet_ext_vips:
+            10.0.0.253: '0e:00:00:00:00:11'
+            10.0.0.252: '0e:00:00:00:00:22'
+        routes:
+            - route:
+                ip_dst: 10.99.99.0/24
+                ip_gw: 10.0.0.1
+            - route:
+                ip_dst: 10.99.98.0/24
+                ip_gw: 10.0.0.99
+    v200:
+        vid: 0x200
+        faucet_vips: ['10.0.2.254/24']
+""" % DP1_CONFIG
+
+    def setUp(self):
+        self.setup_valve(self.CONFIG)
+
+    def test_multipath_ipv4_route(self):
+        """Test IPv4 multipath routes."""
+        port = 1
+        for ip, mac_ in [('10.0.0.1', self.P1_V100_MAC), ('10.0.0.2', self.P2_V200_MAC)]:
+            arp_replies = self.rcv_packet(port, 0x100, {
+                'eth_src': mac_,
+                'eth_dst': mac.BROADCAST_STR,
+                'arp_code': arp.ARP_REQUEST,
+                'arp_source_ip': ip,
+                'arp_target_ip': '10.0.0.254'})
+            self.assertTrue(self.packet_outs_from_flows(arp_replies))
+            port += 1
+        valve_vlan = self.valve.dp.vlans[0x100]
+        ip_dst = ipaddress.IPv4Network('10.100.100.0/24')
+        for pathid, ip_gw in [(None, '10.0.0.1'), (123, '10.0.0.2')]:
+            ip_gw = ipaddress.IPv4Address(ip_gw)
+            route_add_replies = self.valve.add_route(
+                valve_vlan, ip_gw, ip_dst, pathid)
+            self.assertTrue(route_add_replies)
+            route_del_replies = self.valve.del_route(
+                valve_vlan, ip_dst, pathid)
+            self.assertTrue(route_del_replies)
+
+        vip = ipaddress.ip_address('10.0.0.253')
+        ext_vip_add_replies = self.valve.add_ext_vip(valve_vlan, vip=vip, pathid=123)
+        self.assertTrue(ext_vip_add_replies)
+        ext_vip_del_replies = self.valve.del_ext_vip(valve_vlan, vip=vip)
+        self.assertTrue(ext_vip_del_replies)
 
 
 class RyuAppSmokeTest(unittest.TestCase): # pytype: disable=module-attr
