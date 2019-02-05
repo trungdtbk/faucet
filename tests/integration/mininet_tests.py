@@ -840,14 +840,37 @@ class FaucetExperimentalAPITest(FaucetUntaggedTest):
     CONTROLLER_CLASS = mininet_test_topo.FaucetExperimentalAPI
     results_file = None
 
+    CONFIG_GLOBAL = """
+vlans:
+    100:
+        description: "untagged"
+        faucet_vips: ["10.0.0.254/24"]
+        routes:
+            - route:
+                ip_dst: "10.0.1.0/24"
+                ip_gw: "10.0.0.1"
+            - route:
+                ip_dst: "10.0.2.0/24"
+                ip_gw: "10.0.0.2"
+            - route:
+                ip_dst: "10.0.3.0/24"
+                ip_gw: "10.0.0.2"
+"""
+
+    CONFIG = """
+        arp_neighbor_timeout: 2
+        max_resolve_backoff_time: 1
+""" + CONFIG_BOILER_UNTAGGED
+
+
     def _set_static_vars(self):
         super(FaucetExperimentalAPITest, self)._set_static_vars()
         self._set_var_path('faucet', 'API_TEST_RESULT', 'result.txt')
         self.results_file = self.env['faucet']['API_TEST_RESULT']
 
-    def test_untagged(self):
+    def verify_api_call_log(self, timeout=10):
         result = None
-        for _ in range(10):
+        for _ in range(timeout):
             try:
                 with open(self.results_file, 'r') as results:
                     result = results.read().strip()
@@ -857,6 +880,9 @@ class FaucetExperimentalAPITest(FaucetUntaggedTest):
                 pass
             time.sleep(1)
         self.fail('incorrect result from API test: %s' % result)
+
+    def test_untagged(self):
+        self.verify_api_call_log()
 
 
 class FaucetUntaggedLogRotateTest(FaucetUntaggedTest):
