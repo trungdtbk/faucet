@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ipaddress
 
 class FaucetExperimentalAPI:
     """An experimental API for communicating with Faucet.
@@ -78,3 +79,70 @@ class FaucetExperimentalAPI:
     def delete_vlan_acl(self, vlan, acl):
         """Delete an ACL from a VLAN."""
         raise NotImplementedError # pragma: no cover
+
+    @staticmethod
+    def _select_vlan(vlans, vid=None, ipa=None):
+        """Select a vlan based on vid or IP."""
+        if vid and vid in vlans:
+            return vlans[vid]
+        if ipa:
+            for vlan in vlans.values():
+                if vlan.ip_in_vip_subnet(ipa):
+                    return vlan
+        return None
+
+    @staticmethod
+    def _select_valves(valves, dpid=None):
+        """Return a list of valves with dpid or all if not specified."""
+        if dpid and dpid in valves:
+            return [valves[dpid]]
+        return valves.values()
+
+    def modify_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None, add=True):
+        """Add/del a route from a given DP and VLAN or all DPs if not specified."""
+        prefix = ipaddress.ip_network(str(prefix))
+        nexthop = ipaddress.ip_address(str(nexthop))
+        valve_ofmsgs = {}
+        for valve in self._select_valves(self.faucet.valves_manager.valves, dpid):
+            vlan = self._select_vlan(valve.dp.vlans, vid, nexthop)
+            if vlan:
+                if add:
+                    method = valve.add_route
+                else:
+                    method = valve.del_route
+                ofmsgs = method(vlan, ip_dst=prefix, ip_gw=nexthop, pathid=pathid)
+                if ofmsgs:
+                    valve_ofmsgs[valve] = ofmsgs
+        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs)
+
+    def add_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None):
+        """Add a route from a given DP and VLAN or all DPs if not specified."""
+        self.modify_route(prefix, nexthop, dpid, vid, pathid)
+
+    def del_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None):
+        """Delete a route from a given DP and VLAN or all DPs if not specified."""
+        self.modify_route(prefix, nexthop, dpid, vid, pathid, False)
+
+    def modify_ext_vip(self, vip, pathid, dpid=None, vid=None, add=True):
+        """Add/del a VIP from the classification table for a given DP and VLAN."""
+        vip = ipaddress.ip_address(str(vip))
+        valve_ofmsgs = {}
+        for valve in self._select_valves(self.faucet.valves_manager.valves, dpid):
+            vlan = self._select_vlan(valve.dp.vlans, vid, vip)
+            if vlan:
+                if add:
+                    method = valve.add_ext_vip
+                else:
+                    method = valve.del_ext_vip
+                ofmsgs = method(vlan, vip, pathid)
+                if ofmsgs:
+                    valve_ofmsgs[valve] = ofmsgs
+        self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs)
+
+    def add_ext_vip(self, vip, pathid, dpid=None, vid=None):
+        """Add a VIP from the classification table for a given DP and VLAN."""
+        self.modify_ext_vip(vip, pathid, dpid, vid)
+
+    def del_ext_vip(self, vip, pathid, dpid=None, vid=None):
+        """Del a VIP from the classification table for a given DP and VLAN."""
+        self.modify_ext_vip(vip, pathid, dpid, vid, False)
