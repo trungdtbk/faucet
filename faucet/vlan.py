@@ -435,10 +435,14 @@ class VLAN(Conf):
             True if a host FIB route (and not used as a gateway).
         """
         ip_dsts = self.ip_dsts_for_ip_gw(host_ip)
-        if (len(ip_dsts) == 1 and
-                ip_dsts[0].prefixlen == ip_dsts[0].max_prefixlen and
-                ip_dsts[0].network_address == host_ip):
-            return True
+        if len(ip_dsts) == 1:
+            if isinstance(ip_dsts[0], tuple):
+                ip_dst, _ = ip_dsts[0]
+            else:
+                ip_dst = ip_dsts[0]
+            if (ip_dst.prefixlen == ip_dst.max_prefixlen and
+                    ip_dst.network_address == host_ip):
+                return True
         return False
 
     def _update_gw_types(self, ip_gw):
