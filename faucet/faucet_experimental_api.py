@@ -99,7 +99,10 @@ class FaucetExperimentalAPI:
         return valves.values()
 
     def modify_route(self, prefix, nexthop, dpid=None, vid=None, pathid=None, add=True): # pylint: disable=too-many-arguments
-        """Add/del a route from a given DP and VLAN or all DPs if not specified."""
+        """Add/del a route from a given DP and VLAN or all DPs if not specified.
+        If we manage a stack, we need to add route to other DPs as well. It requires the
+        vlan to exist in every DP
+        """
         prefix = ipaddress.ip_network(str(prefix))
         nexthop = ipaddress.ip_address(str(nexthop))
         valve_ofmsgs = {}
@@ -108,9 +111,11 @@ class FaucetExperimentalAPI:
             if vlan:
                 if add:
                     method = valve.add_route
+                    kwargs = {'vlan': vlan, 'ip_dst': prefix, 'ip_gw': nexthop, 'pathid': pathid}
                 else:
                     method = valve.del_route
-                ofmsgs = method(vlan, ip_dst=prefix, ip_gw=nexthop, pathid=pathid)
+                    kwargs = {'vlan': vlan, 'ip_dst': prefix, 'pathid': pathid}
+                ofmsgs = method(**kwargs)
                 if ofmsgs:
                     valve_ofmsgs[valve] = ofmsgs
         self.faucet.valves_manager._send_ofmsgs_by_valve(valve_ofmsgs) # pylint: disable=protected-access
