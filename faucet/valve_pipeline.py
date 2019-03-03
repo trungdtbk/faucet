@@ -175,7 +175,7 @@ class ValvePipeline(ValveManagerBase):
             priority=self.filter_priority + priority_offset)]
 
     def select_packets(self, target_table, match_dict, actions=None,
-                       priority_offset=0, metadata=None, mask=None):
+                       priority_offset=0, metadata=None, mask=((1<<64)-1)):
         """retrieve rules to redirect packets matching match_dict to table"""
         if metadata:
             inst = target_table.goto_this_with_metadata(metadata, mask)
