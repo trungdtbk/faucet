@@ -363,7 +363,7 @@ class ValveRouteManager(ValveManagerBase):
                 inst=self._controller_and_flood()))
         return ofmsgs
 
-    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host):
+    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host, faucet_mac=None):
         raise NotImplementedError # pragma: no cover
 
     def add_vlan(self, vlan):
@@ -783,8 +783,9 @@ class ValveIPv4RouteManager(ValveRouteManager):
     def _vlan_nexthop_cache_limit(self, vlan):
         return vlan.proactive_arp_limit
 
-    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host):
+    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host, faucet_mac=None):
         ofmsgs = []
+        faucet_mac = faucet_mac or vlan.faucet_mac
         # ARP
         ofmsgs.extend(self.pipeline.select_packets(
             self.vip_table,
@@ -802,7 +803,7 @@ class ValveIPv4RouteManager(ValveRouteManager):
         ofmsgs.append(self.vip_table.flowcontroller(
             self.vip_table.match(
                 eth_type=valve_of.ether.ETH_TYPE_ARP,
-                eth_dst=vlan.faucet_mac),
+                eth_dst=faucet_mac),
             priority=priority,
             max_len=valve_packet.VLAN_ARP_PKT_SIZE))
         priority -= 1
@@ -884,10 +885,11 @@ class ValveIPv6RouteManager(ValveRouteManager):
     def _vlan_nexthop_cache_limit(self, vlan):
         return vlan.proactive_nd_limit
 
-    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host):
+    def _add_faucet_vip_nd(self, vlan, priority, faucet_vip, faucet_vip_host, faucet_mac=None):
         faucet_vip_host_nd_mcast = valve_packet.ipv6_link_eth_mcast(
             valve_packet.ipv6_solicited_node_from_ucast(faucet_vip.ip))
         ofmsgs = []
+        faucet_mac = faucet_mac or vlan.faucet_mac
         # RA if this is a link local FAUCET VIP
         if faucet_vip.ip.is_link_local:
             match = {
@@ -908,7 +910,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
         ofmsgs.append(self.vip_table.flowcontroller(
             self.vip_table.match(
                 eth_type=self.ETH_TYPE,
-                eth_dst=vlan.faucet_mac,
+                eth_dst=faucet_mac,
                 nw_proto=valve_of.inet.IPPROTO_ICMPV6,
                 icmpv6_type=icmpv6.ICMPV6_ECHO_REQUEST),
             priority=priority,
@@ -917,7 +919,7 @@ class ValveIPv6RouteManager(ValveRouteManager):
         ofmsgs.append(self.vip_table.flowcontroller(
             self.vip_table.match(
                 eth_type=self.ETH_TYPE,
-                eth_dst=vlan.faucet_mac,
+                eth_dst=faucet_mac,
                 nw_proto=valve_of.inet.IPPROTO_ICMPV6,
                 icmpv6_type=icmpv6.ND_NEIGHBOR_ADVERT),
             priority=priority,
