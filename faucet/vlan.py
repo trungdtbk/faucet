@@ -636,6 +636,8 @@ class VLAN(Conf):
 
     def is_faucet_vip(self, ipa, faucet_vip=None):
         """Return True if IP is a VIP on this VLAN."""
+        if ipa in self.faucet_ext_vips:
+            return True
         if faucet_vip is None:
             faucet_vip = self.vip_map(ipa)
         return faucet_vip and ipa == faucet_vip.ip
