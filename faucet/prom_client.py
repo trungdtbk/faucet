@@ -56,9 +56,7 @@ class PromClient: # pylint: disable=too-few-public-methods
         if reg is not None:
             self._reg = reg
         # TODO: investigate faster alternative (https://bugs.launchpad.net/pbr/+bug/1688405)
-        #version = VersionInfo('faucet').semantic_version().release_string()
-        version = '1.8.34'
-        #TODO: enable version detection. disable this because it fails to run faucet from source
+        version = VersionInfo('faucet').semantic_version().release_string()
         self.faucet_version = PromGauge( # pylint: disable=unexpected-keyword-arg
             'faucet_pbr_version',
             'Faucet PBR version',
